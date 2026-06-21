@@ -1,0 +1,225 @@
+.image-gallery-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.image-gallery {
+  background: var(--bg-primary);
+  border-radius: 12px;
+  width: 720px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+.image-gallery-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.image-gallery-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.image-gallery-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.image-gallery-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.image-gallery-loading,
+.image-gallery-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px 20px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.image-gallery-loading .spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--accent-color);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.image-gallery-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border-color);
+  gap: 12px;
+}
+
+.image-gallery-count {
+  font-size: 13px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.image-gallery-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.image-gallery-btn-text {
+  border: none;
+  background: transparent;
+  color: var(--accent-color);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.image-gallery-btn-text:hover {
+  background: var(--accent-color-alpha);
+}
+
+.image-gallery-btn-text:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.image-gallery-btn-download {
+  border: none;
+  background: var(--accent-color);
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 6px 14px;
+  border-radius: 6px;
+}
+
+.image-gallery-btn-download:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.image-gallery-btn-download:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.image-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.image-gallery-item {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.image-gallery-item:hover {
+  border-color: var(--border-color);
+}
+
+.image-gallery-item-selected {
+  border-color: var(--accent-color);
+}
+
+.image-gallery-thumb {
+  position: relative;
+  aspect-ratio: 1;
+  background: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.image-gallery-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.image-gallery-checkbox {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: flex;
+  pointer-events: none;
+}
+
+.image-gallery-single-dl {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.image-gallery-item:hover .image-gallery-single-dl {
+  opacity: 1;
+}
+
+.image-gallery-single-dl:hover {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.image-gallery-info {
+  padding: 4px 6px;
+  text-align: center;
+}
+
+.image-gallery-size {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}

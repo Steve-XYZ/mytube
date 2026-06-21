@@ -1,0 +1,148 @@
+// ===== Tab Types =====
+export type MediaDetectionState = 'none' | 'detecting' | 'detected' | 'unsupported';
+
+export interface TabInfo {
+  id: string;
+  title: string;
+  url: string;
+  favicon?: string;
+  isLoading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  isSecure: boolean;
+  zoomLevel: number;
+  webContentsId: number;
+  mediaState: MediaDetectionState;
+  mediaTitle?: string;
+}
+
+// ===== Download Types =====
+export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'completed' | 'failed';
+
+export interface DownloadItem {
+  id: string;
+  url: string;
+  title: string;
+  filename: string;
+  savePath: string;
+  type: 'video' | 'image' | 'audio';
+  status: DownloadStatus;
+  progress: number;
+  speed?: string;
+  eta?: string;
+  totalSize?: string;
+  downloadedSize?: string;
+  format?: string;
+  thumbnail?: string;
+  error?: string;
+  createdAt: number;
+  completedAt?: number;
+}
+
+export interface VideoFormat {
+  formatId: string;
+  ext: string;
+  resolution?: string;
+  fps?: number;
+  vcodec?: string;
+  acodec?: string;
+  filesize?: number;
+  filesizeApprox?: number;
+  label: string;
+  hasVideo: boolean;
+  hasAudio: boolean;
+}
+
+export interface VideoInfo {
+  id: string;
+  title: string;
+  description?: string;
+  thumbnail?: string;
+  duration?: number;
+  uploader?: string;
+  url: string;
+  formats: VideoFormat[];
+}
+
+// ===== IPC Channel Types =====
+export const IPC_CHANNELS = {
+  // Tab management
+  TAB_CREATE: 'tab:create',
+  TAB_CLOSE: 'tab:close',
+  TAB_SWITCH: 'tab:switch',
+  TAB_NAVIGATE: 'tab:navigate',
+  TAB_GO_BACK: 'tab:go-back',
+  TAB_GO_FORWARD: 'tab:go-forward',
+  TAB_RELOAD: 'tab:reload',
+  TAB_STOP: 'tab:stop',
+  TAB_UPDATE: 'tab:update',
+  TAB_LIST: 'tab:list',
+  TAB_ACTIVE_CHANGED: 'tab:active-changed',
+
+  // Zoom
+  ZOOM_IN: 'zoom:in',
+  ZOOM_OUT: 'zoom:out',
+  ZOOM_RESET: 'zoom:reset',
+
+  // Find in page
+  FIND_IN_PAGE: 'find:in-page',
+  FIND_NEXT: 'find:next',
+  FIND_PREVIOUS: 'find:previous',
+  FIND_STOP: 'find:stop',
+  FIND_RESULT: 'find:result',
+
+  // Context menu
+  CONTEXT_MENU_OPEN_LINK: 'context:open-link',
+  CONTEXT_MENU_COPY_LINK: 'context:copy-link',
+  CONTEXT_MENU_SAVE_IMAGE: 'context:save-image',
+
+  // Download management
+  DOWNLOAD_START: 'download:start',
+  DOWNLOAD_PAUSE: 'download:pause',
+  DOWNLOAD_RESUME: 'download:resume',
+  DOWNLOAD_CANCEL: 'download:cancel',
+  DOWNLOAD_PROGRESS: 'download:progress',
+  DOWNLOAD_COMPLETE: 'download:complete',
+  DOWNLOAD_ERROR: 'download:error',
+  DOWNLOAD_LIST: 'download:list',
+
+  // Media detection
+  MEDIA_DETECTED: 'media:detected',
+  MEDIA_GET_INFO: 'media:get-info',
+  MEDIA_GET_FORMATS: 'media:get-formats',
+
+  // Settings
+  SETTINGS_GET: 'settings:get',
+  SETTINGS_SET: 'settings:set',
+  SETTINGS_GET_ALL: 'settings:get-all',
+
+  // App
+  APP_GET_VERSION: 'app:get-version',
+  APP_SELECT_DIRECTORY: 'app:select-directory',
+} as const;
+
+// ===== Find In Page =====
+export interface FindInPageResult {
+  activeMatchOrdinal: number;
+  matches: number;
+}
+
+// ===== Settings Types =====
+export interface AppSettings {
+  general: {
+    theme: 'light' | 'dark' | 'system';
+    language: 'en' | 'es';
+    startOnBoot: boolean;
+  };
+  downloads: {
+    defaultDirectory: string;
+    videoQuality: 'best' | '1080p' | '720p' | '480p' | 'audio-only';
+    videoFormat: 'mp4' | 'mkv' | 'webm';
+    audioFormat: 'mp3' | 'm4a' | 'opus';
+    maxConcurrent: number;
+  };
+  browser: {
+    homepage: string;
+    searchEngine: 'google' | 'duckduckgo' | 'bing';
+  };
+}

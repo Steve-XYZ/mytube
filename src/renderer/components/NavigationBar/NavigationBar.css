@@ -1,0 +1,155 @@
+.nav-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  height: 48px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 12px;
+  gap: 8px;
+  position: relative;
+}
+
+.nav-buttons {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.nav-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.nav-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.url-bar-form {
+  flex: 1;
+}
+
+.url-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0 12px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.url-bar-focused {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px var(--accent-color-alpha);
+}
+
+.url-lock {
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.url-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  font-family: inherit;
+}
+
+.url-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.nav-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.zoom-indicator {
+  width: auto;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.nav-btn-download-active {
+  color: var(--accent-color);
+  background: var(--accent-color-alpha);
+}
+
+.nav-btn-download-active:hover {
+  color: var(--accent-color);
+  filter: brightness(1.1);
+}
+
+.nav-btn-download-detecting {
+  color: var(--text-tertiary);
+}
+
+.nav-btn-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent-color);
+  border-radius: 50%;
+  animation: nav-spin 0.8s linear infinite;
+}
+
+@keyframes nav-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Loading progress bar */
+.nav-loading-bar {
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: transparent;
+  overflow: hidden;
+  z-index: 10;
+}
+
+.nav-loading-bar-progress {
+  height: 100%;
+  background: var(--accent-color);
+  animation: nav-loading 2s ease-in-out infinite;
+  transform-origin: left;
+}
+
+@keyframes nav-loading {
+  0% {
+    transform: translateX(-100%) scaleX(0.3);
+  }
+  40% {
+    transform: translateX(0%) scaleX(0.6);
+  }
+  100% {
+    transform: translateX(100%) scaleX(0.3);
+  }
+}

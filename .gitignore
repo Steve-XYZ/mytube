@@ -1,0 +1,12 @@
+node_modules/
+dist/
+release/
+bin/
+*.log
+*.tgz
+.DS_Store
+Thumbs.db
+.env
+.env.local
+build/icon_source.png
+build/icon.iconset/
