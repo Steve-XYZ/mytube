@@ -70,18 +70,17 @@ export default function App() {
   }, []);
 
   const mediaState: MediaDetectionState = activeTab?.mediaState || 'none';
+  const activeUrl = activeTab?.url || '';
 
   // Cmd+D: download media from current page
   useEffect(() => {
     const unsub = window.electronAPI.onDownloadMedia(() => {
-      if (mediaState === 'detected' || mediaState === 'detecting') {
-        if (activeTab?.url) {
-          setFormatSelectorUrl(activeTab.url);
-        }
+      if (activeUrl) {
+        setFormatSelectorUrl(activeUrl);
       }
     });
     return unsub;
-  }, [mediaState, activeTab?.url]);
+  }, [activeUrl]);
 
   // Listen for download errors to show toasts
   useEffect(() => {
@@ -102,12 +101,10 @@ export default function App() {
   }, [addToast]);
 
   const handleDownloadClick = useCallback(() => {
-    if (mediaState === 'detected' || mediaState === 'detecting') {
-      setFormatSelectorUrl(activeTab?.url || null);
-    } else {
-      setDownloadPanelVisible((prev) => !prev);
+    if (activeUrl) {
+      setFormatSelectorUrl(activeUrl);
     }
-  }, [mediaState, activeTab?.url]);
+  }, [activeUrl]);
 
   const handleStartDownload = useCallback(
     async (url: string, options: { formatId?: string; audioOnly?: boolean; title?: string }) => {
