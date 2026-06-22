@@ -77,7 +77,7 @@ export class MainWindow {
 
       const isDev = process.env.NODE_ENV === 'development' || process.env.VITE_DEV_SERVER_URL;
       const csp = isDev
-        ? "default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' http://localhost:*; style-src 'self' 'unsafe-inline'; img-src 'self' https: http: data:; connect-src 'self' http://localhost:* ws://localhost:*;"
+        ? "default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:*; style-src 'self' 'unsafe-inline'; img-src 'self' https: http: data:; connect-src 'self' http://localhost:* ws://localhost:*;"
         : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self' https:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';";
 
       callback({
