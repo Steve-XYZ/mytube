@@ -75,7 +75,14 @@ describe('MediaDetector', () => {
     it('filters out non-http URLs', () => {
       const images: DetectedImage[] = [
         { url: 'data:image/png;base64,...', alt: '', width: 100, height: 100, naturalWidth: 100, naturalHeight: 100 },
-        { url: 'blob:https://example.com/123', alt: '', width: 100, height: 100, naturalWidth: 100, naturalHeight: 100 },
+        {
+          url: 'blob:https://example.com/123',
+          alt: '',
+          width: 100,
+          height: 100,
+          naturalWidth: 100,
+          naturalHeight: 100,
+        },
       ];
       expect(filterImages(images)).toHaveLength(0);
     });
@@ -90,17 +97,38 @@ describe('MediaDetector', () => {
 
     it('keeps large images', () => {
       const images: DetectedImage[] = [
-        { url: 'https://example.com/photo.jpg', alt: 'Photo', width: 800, height: 600, naturalWidth: 1600, naturalHeight: 1200 },
+        {
+          url: 'https://example.com/photo.jpg',
+          alt: 'Photo',
+          width: 800,
+          height: 600,
+          naturalWidth: 1600,
+          naturalHeight: 1200,
+        },
       ];
       expect(filterImages(images)).toHaveLength(1);
     });
 
     it('filters out tracking patterns in URL', () => {
       const images: DetectedImage[] = [
-        { url: 'https://analytics.com/tracking/pixel.gif', alt: '', width: 100, height: 100, naturalWidth: 100, naturalHeight: 100 },
+        {
+          url: 'https://analytics.com/tracking/pixel.gif',
+          alt: '',
+          width: 100,
+          height: 100,
+          naturalWidth: 100,
+          naturalHeight: 100,
+        },
         { url: 'https://ads.com/beacon.png', alt: '', width: 100, height: 100, naturalWidth: 100, naturalHeight: 100 },
         { url: 'https://example.com/1x1.gif', alt: '', width: 100, height: 100, naturalWidth: 100, naturalHeight: 100 },
-        { url: 'https://example.com/spacer.gif', alt: '', width: 100, height: 100, naturalWidth: 100, naturalHeight: 100 },
+        {
+          url: 'https://example.com/spacer.gif',
+          alt: '',
+          width: 100,
+          height: 100,
+          naturalWidth: 100,
+          naturalHeight: 100,
+        },
       ];
       expect(filterImages(images)).toHaveLength(0);
     });
@@ -115,7 +143,14 @@ describe('MediaDetector', () => {
 
     it('filters when only width is too small', () => {
       const images: DetectedImage[] = [
-        { url: 'https://example.com/narrow.png', alt: '', width: 30, height: 200, naturalWidth: 30, naturalHeight: 200 },
+        {
+          url: 'https://example.com/narrow.png',
+          alt: '',
+          width: 30,
+          height: 200,
+          naturalWidth: 30,
+          naturalHeight: 200,
+        },
       ];
       expect(filterImages(images)).toHaveLength(0);
     });

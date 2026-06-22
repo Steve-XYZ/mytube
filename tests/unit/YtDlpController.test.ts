@@ -12,9 +12,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // We re-implement the regex parsing here to test it in isolation
 // since the class constructor requires electron's `app` module.
 
-function parseProgressLine(line: string): { percent: number; totalSize: string; speed: string; eta: string; filename: string } | null {
+function parseProgressLine(
+  line: string,
+): { percent: number; totalSize: string; speed: string; eta: string; filename: string } | null {
   const match = line.match(
-    /\[download\]\s+([\d.]+)%\s+of\s+~?([\d.]+\w+)\s+(?:at\s+([\d.]+\w+\/s)\s+ETA\s+(\S+)|in\s+\S+)/
+    /\[download\]\s+([\d.]+)%\s+of\s+~?([\d.]+\w+)\s+(?:at\s+([\d.]+\w+\/s)\s+ETA\s+(\S+)|in\s+\S+)/,
   );
 
   if (match) {
@@ -335,7 +337,7 @@ describe('YtDlpController - simplifyFormats', () => {
       { formatId: '3', resolution: '1280x720', hasVideo: true, hasAudio: true, ext: 'mp4', fps: 30 },
     ];
     const result = simplifyFormats(formats);
-    const videoResults = result.filter(r => !r.label.includes('Audio'));
+    const videoResults = result.filter((r) => !r.label.includes('Audio'));
     expect(videoResults).toHaveLength(2);
   });
 
@@ -346,7 +348,7 @@ describe('YtDlpController - simplifyFormats', () => {
       { formatId: 'a2', hasVideo: false, hasAudio: true, ext: 'opus', filesize: 3000000 },
     ];
     const result = simplifyFormats(formats);
-    const audioResult = result.find(r => r.label.includes('Audio'));
+    const audioResult = result.find((r) => r.label.includes('Audio'));
     expect(audioResult).toBeDefined();
     expect(audioResult!.formatId).toBe('a1'); // largest
   });
@@ -358,7 +360,7 @@ describe('YtDlpController - simplifyFormats', () => {
       { formatId: '3', resolution: '1280x720', hasVideo: true, hasAudio: true, ext: 'mp4' },
     ];
     const result = simplifyFormats(formats);
-    const videoResults = result.filter(r => !r.label.includes('Audio'));
+    const videoResults = result.filter((r) => !r.label.includes('Audio'));
     expect(videoResults[0].formatId).toBe('2'); // 1080
     expect(videoResults[1].formatId).toBe('3'); // 720
     expect(videoResults[2].formatId).toBe('1'); // 480
@@ -374,7 +376,7 @@ describe('YtDlpController - simplifyFormats', () => {
     ];
     const result = simplifyFormats(formats);
     // 0p key, height=0, not added since height must be > 0
-    const videoResults = result.filter(r => !r.label.includes('Audio'));
+    const videoResults = result.filter((r) => !r.label.includes('Audio'));
     expect(videoResults).toHaveLength(0);
   });
 });

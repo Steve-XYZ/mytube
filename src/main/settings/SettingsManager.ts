@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import { IPC_CHANNELS, AppSettings } from '../../shared/types';
 import log from 'electron-log/main';
 
-type WebContentsSender = { send: (channel: string, ...args: any[]) => void };
+type WebContentsSender = { send: (channel: string, ...args: unknown[]) => void };
 
 const DEFAULT_SETTINGS: AppSettings = {
   general: {
@@ -48,10 +48,10 @@ export class SettingsManager {
         const raw = fs.readFileSync(this.filePath, 'utf-8');
         const data = JSON.parse(raw);
         // Deep merge with defaults to handle new settings added in updates
-        return this.deepMerge(DEFAULT_SETTINGS, data);
+        return this.deepMerge(DEFAULT_SETTINGS as unknown as Record<string, unknown>, data) as unknown as AppSettings;
       }
-    } catch (err: any) {
-      log.error('Failed to load settings:', err.message);
+    } catch (err: unknown) {
+      log.error('Failed to load settings:', getErrorMessage(err));
       // Backup corrupted file before resetting to defaults
       this.backupCorruptedFile();
     }
@@ -65,8 +65,8 @@ export class SettingsManager {
         fs.copyFileSync(this.filePath, backupPath);
         log.info(`Corrupted settings backed up to: ${backupPath}`);
       }
-    } catch (err: any) {
-      log.error('Failed to backup corrupted settings:', err.message);
+    } catch (err: unknown) {
+      log.error('Failed to backup corrupted settings:', getErrorMessage(err));
     }
   }
 
@@ -77,23 +77,26 @@ export class SettingsManager {
         fs.mkdirSync(dir, { recursive: true });
       }
       fs.writeFileSync(this.filePath, JSON.stringify(this.settings, null, 2), 'utf-8');
-    } catch (err: any) {
-      if (err.code === 'ENOSPC') {
+    } catch (err: unknown) {
+      if (getErrorCode(err) === 'ENOSPC') {
         log.error('Disk full — cannot save settings');
       } else {
-        log.error('Failed to save settings:', err.message);
+        log.error('Failed to save settings:', getErrorMessage(err));
       }
     }
   }
 
-  private deepMerge(defaults: any, overrides: any): any {
+  private deepMerge<T extends Record<string, unknown>>(defaults: T, overrides: unknown): T {
+    const overrideRecord = isRecord(overrides) ? overrides : {};
     const result = { ...defaults };
-    for (const key of Object.keys(defaults)) {
-      if (key in overrides) {
-        if (typeof defaults[key] === 'object' && defaults[key] !== null && !Array.isArray(defaults[key])) {
-          result[key] = this.deepMerge(defaults[key], overrides[key] || {});
+    for (const key of Object.keys(defaults) as Array<keyof T>) {
+      if (Object.prototype.hasOwnProperty.call(overrideRecord, key)) {
+        const defaultValue = defaults[key];
+        const overrideValue = overrideRecord[key as string];
+        if (isRecord(defaultValue)) {
+          result[key] = this.deepMerge(defaultValue, overrideValue) as T[keyof T];
         } else {
-          result[key] = overrides[key];
+          result[key] = overrideValue as T[keyof T];
         }
       }
     }
@@ -137,9 +140,9 @@ export class SettingsManager {
 
   get(key: string): unknown {
     const parts = key.split('.');
-    let current: any = this.settings;
+    let current: unknown = this.settings;
     for (const part of parts) {
-      if (current == null || typeof current !== 'object') return undefined;
+      if (!isRecord(current)) return undefined;
       current = current[part];
     }
     return current;
@@ -147,10 +150,11 @@ export class SettingsManager {
 
   set(key: string, value: unknown): void {
     const parts = key.split('.');
-    let current: any = this.settings;
+    let current = this.settings as unknown as Record<string, unknown>;
     for (let i = 0; i < parts.length - 1; i++) {
-      if (!(parts[i] in current)) current[parts[i]] = {};
-      current = current[parts[i]];
+      const part = parts[i];
+      if (!isRecord(current[part])) current[part] = {};
+      current = current[part] as Record<string, unknown>;
     }
     current[parts[parts.length - 1]] = value;
     this.saveSettings();
@@ -232,4 +236,16 @@ export class SettingsManager {
     ipcMain.removeHandler(IPC_CHANNELS.APP_SELECT_DIRECTORY);
     this.changeListeners = [];
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function getErrorCode(err: unknown): unknown {
+  return isRecord(err) ? err.code : undefined;
 }

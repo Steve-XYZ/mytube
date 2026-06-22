@@ -62,7 +62,14 @@ export function Settings({ visible, onClose }: SettingsProps) {
               onClick={() => setActiveSection('downloads')}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M8 1v9M4 7l4 4 4-4M2 13h12" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                <path
+                  d="M8 1v9M4 7l4 4 4-4M2 13h12"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
               </svg>
               Downloads
             </button>
@@ -72,7 +79,12 @@ export function Settings({ visible, onClose }: SettingsProps) {
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.5" fill="none" />
-                <path d="M1.5 8h13M8 1.5c-2 2-2.5 4-2.5 6.5s.5 4.5 2.5 6.5c2-2 2.5-4 2.5-6.5S10 3.5 8 1.5z" stroke="currentColor" strokeWidth="1.2" fill="none" />
+                <path
+                  d="M1.5 8h13M8 1.5c-2 2-2.5 4-2.5 6.5s.5 4.5 2.5 6.5c2-2 2.5-4 2.5-6.5S10 3.5 8 1.5z"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                  fill="none"
+                />
               </svg>
               Browser
             </button>
@@ -117,10 +129,7 @@ function GeneralSettings({
           <span>Theme</span>
           <span className="settings-description">Choose the app appearance</span>
         </div>
-        <select
-          value={settings.general.theme}
-          onChange={(e) => onUpdate('general.theme', e.target.value)}
-        >
+        <select value={settings.general.theme} onChange={(e) => onUpdate('general.theme', e.target.value)}>
           <option value="system">System</option>
           <option value="light">Light</option>
           <option value="dark">Dark</option>
@@ -132,10 +141,7 @@ function GeneralSettings({
           <span>Language</span>
           <span className="settings-description">Interface language</span>
         </div>
-        <select
-          value={settings.general.language}
-          onChange={(e) => onUpdate('general.language', e.target.value)}
-        >
+        <select value={settings.general.language} onChange={(e) => onUpdate('general.language', e.target.value)}>
           <option value="en">English</option>
           <option value="es">Español</option>
         </select>

@@ -1,1 +1,4 @@
-onlyBuiltDependencies: '["electron","electron-winstaller","esbuild"]'
+onlyBuiltDependencies:
+  - electron
+  - electron-winstaller
+  - esbuild

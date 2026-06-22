@@ -24,6 +24,30 @@ type ProgressCallback = (progress: DownloadProgress) => void;
 type CompleteCallback = (filePath: string) => void;
 type ErrorCallback = (error: string) => void;
 
+interface YtDlpRawFormat {
+  format_id?: string;
+  ext?: string;
+  resolution?: string;
+  width?: number;
+  height?: number;
+  fps?: number;
+  vcodec?: string;
+  acodec?: string;
+  filesize?: number;
+  filesize_approx?: number;
+}
+
+interface YtDlpJson {
+  id?: string;
+  title?: string;
+  description?: string;
+  thumbnail?: string;
+  duration?: number;
+  uploader?: string;
+  channel?: string;
+  formats?: YtDlpRawFormat[];
+}
+
 export class YtDlpController {
   private ytdlpPath: string;
   private ffmpegPath: string;
@@ -101,18 +125,13 @@ export class YtDlpController {
       throw new Error('yt-dlp binary not found. Please reinstall the application.');
     }
 
-    const output = await this.execYtDlp([
-      '--dump-json',
-      '--no-playlist',
-      '--no-warnings',
-      url,
-    ]);
+    const output = await this.execYtDlp(['--dump-json', '--no-playlist', '--no-warnings', url]);
 
-    const data = JSON.parse(output);
+    const data = JSON.parse(output) as YtDlpJson;
 
     const formats: VideoFormat[] = (data.formats || [])
-      .filter((f: any) => f.format_id && f.ext)
-      .map((f: any) => ({
+      .filter((f): f is YtDlpRawFormat & { format_id: string; ext: string } => Boolean(f.format_id && f.ext))
+      .map((f) => ({
         formatId: f.format_id,
         ext: f.ext,
         resolution: f.resolution || (f.height ? `${f.width}x${f.height}` : undefined),
@@ -127,8 +146,8 @@ export class YtDlpController {
       }));
 
     return {
-      id: data.id,
-      title: YtDlpController.sanitizeText(data.title) || 'Unknown',
+      id: data.id || '',
+      title: YtDlpController.sanitizeText(data.title || '') || 'Unknown',
       description: data.description,
       thumbnail: data.thumbnail,
       duration: data.duration,
@@ -160,12 +179,7 @@ export class YtDlpController {
       return;
     }
 
-    const args: string[] = [
-      '--newline',
-      '--no-playlist',
-      '--ffmpeg-location', this.ffmpegPath,
-      '--no-warnings',
-    ];
+    const args: string[] = ['--newline', '--no-playlist', '--ffmpeg-location', this.ffmpegPath, '--no-warnings'];
 
     // Format selection
     if (options.audioOnly) {
@@ -323,7 +337,7 @@ export class YtDlpController {
     // [download]  45.2% of  150.00MiB at    5.00MiB/s ETA 00:16
     // [download] 100% of  150.00MiB in 00:30
     const match = line.match(
-      /\[download\]\s+([\d.]+)%\s+of\s+~?([\d.]+\w+)\s+(?:at\s+([\d.]+\w+\/s)\s+ETA\s+(\S+)|in\s+\S+)/
+      /\[download\]\s+([\d.]+)%\s+of\s+~?([\d.]+\w+)\s+(?:at\s+([\d.]+\w+\/s)\s+ETA\s+(\S+)|in\s+\S+)/,
     );
 
     if (match) {
@@ -351,7 +365,7 @@ export class YtDlpController {
     return null;
   }
 
-  private buildFormatLabel(f: any): string {
+  private buildFormatLabel(f: YtDlpRawFormat): string {
     const parts: string[] = [];
 
     if (f.height) {
@@ -373,7 +387,7 @@ export class YtDlpController {
       parts.push(f.acodec.split('.')[0]);
     }
 
-    parts.push(f.ext);
+    parts.push(f.ext || 'unknown');
 
     const size = f.filesize || f.filesize_approx;
     if (size) {

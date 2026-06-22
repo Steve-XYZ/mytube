@@ -117,7 +117,7 @@ describe('DownloadManager', () => {
       expect(result).toBe(true);
 
       const list = manager.getDownloadList();
-      const cancelled = list.find(d => d.id === item.id);
+      const cancelled = list.find((d) => d.id === item.id);
       expect(cancelled?.status).toBe('failed');
       expect(cancelled?.error).toBe('Cancelled');
     });
@@ -139,19 +139,21 @@ describe('DownloadManager', () => {
   describe('state persistence', () => {
     it('loads state from file on construction', () => {
       (fs.existsSync as any).mockReturnValue(true);
-      (fs.readFileSync as any).mockReturnValue(JSON.stringify([
-        {
-          id: 'saved-1',
-          url: 'https://example.com',
-          title: 'Saved Video',
-          filename: 'video.mp4',
-          savePath: '/tmp/video.mp4',
-          type: 'video',
-          status: 'completed',
-          progress: 100,
-          createdAt: Date.now() - 10000,
-        },
-      ]));
+      (fs.readFileSync as any).mockReturnValue(
+        JSON.stringify([
+          {
+            id: 'saved-1',
+            url: 'https://example.com',
+            title: 'Saved Video',
+            filename: 'video.mp4',
+            savePath: '/tmp/video.mp4',
+            type: 'video',
+            status: 'completed',
+            progress: 100,
+            createdAt: Date.now() - 10000,
+          },
+        ]),
+      );
 
       const mgr = new DownloadManager(mockSender);
       const list = mgr.getDownloadList();

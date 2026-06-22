@@ -28,7 +28,7 @@ export class ImageDownloader {
       savePath?: string;
       referer?: string;
       filename?: string;
-    }
+    },
   ): Promise<ImageDownloadResult> {
     try {
       const filename = this.sanitizeFilename(options?.filename || this.getFilenameFromUrl(url));
@@ -49,9 +49,10 @@ export class ImageDownloader {
 
       log.info(`Image downloaded: ${finalPath}`);
       return { success: true, filePath: finalPath };
-    } catch (err: any) {
-      log.error(`Image download failed: ${url}`, err.message);
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error(`Image download failed: ${url}`, message);
+      return { success: false, error: message };
     }
   }
 
@@ -60,9 +61,7 @@ export class ImageDownloader {
     options?: { referer?: string; subDir?: string },
     onProgress?: (completed: number, total: number) => void,
   ): Promise<ImageDownloadResult[]> {
-    const dir = options?.subDir
-      ? path.join(this.defaultDir, this.sanitizeFilename(options.subDir))
-      : this.defaultDir;
+    const dir = options?.subDir ? path.join(this.defaultDir, this.sanitizeFilename(options.subDir)) : this.defaultDir;
 
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -80,8 +79,8 @@ export class ImageDownloader {
           this.downloadImage(img.url, {
             savePath: path.join(dir, img.filename || this.getFilenameFromUrl(img.url)),
             referer: options?.referer,
-          })
-        )
+          }),
+        ),
       );
       results.push(...batchResults);
       onProgress?.(Math.min(i + batchSize, total), total);
@@ -104,7 +103,8 @@ export class ImageDownloader {
   private httpDownload(url: string, destPath: string, referer?: string, redirectCount = 0): Promise<void> {
     return new Promise((resolve, reject) => {
       const headers: Record<string, string> = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
       };
       if (referer) {
         headers['Referer'] = referer;
@@ -113,7 +113,12 @@ export class ImageDownloader {
       const client = url.startsWith('https') ? https : http;
       const request = client.get(url, { headers }, (response) => {
         // Handle redirects (max 5)
-        if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        if (
+          response.statusCode &&
+          response.statusCode >= 300 &&
+          response.statusCode < 400 &&
+          response.headers.location
+        ) {
           if (redirectCount >= 5) {
             reject(new Error('Too many redirects'));
             return;
@@ -189,11 +194,13 @@ export class ImageDownloader {
   }
 
   private sanitizeFilename(name: string): string {
-    return name
-      // eslint-disable-next-line no-control-regex
-      .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
-      .replace(/\s+/g, '_')
-      .slice(0, 200);
+    return (
+      name
+        // eslint-disable-next-line no-control-regex
+        .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+        .replace(/\s+/g, '_')
+        .slice(0, 200)
+    );
   }
 
   private ensureUniquePath(filePath: string): string {

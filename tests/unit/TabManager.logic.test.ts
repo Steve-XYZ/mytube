@@ -17,10 +17,20 @@ function isKnownVideoUrl(url: string): boolean {
     }
 
     const videoPlatforms = [
-      'vimeo.com', 'dailymotion.com', 'tiktok.com',
-      'twitter.com', 'x.com', 'instagram.com', 'reddit.com',
-      'facebook.com', 'twitch.tv', 'rumble.com', 'bilibili.com',
-      'odysee.com', 'bandcamp.com', 'soundcloud.com',
+      'vimeo.com',
+      'dailymotion.com',
+      'tiktok.com',
+      'twitter.com',
+      'x.com',
+      'instagram.com',
+      'reddit.com',
+      'facebook.com',
+      'twitch.tv',
+      'rumble.com',
+      'bilibili.com',
+      'odysee.com',
+      'bandcamp.com',
+      'soundcloud.com',
     ];
     return videoPlatforms.some((p) => host.includes(p));
   } catch {
@@ -71,22 +81,38 @@ function escapeHtml(str: string): string {
 // ===== getFriendlyError =====
 function getFriendlyError(code: number): string {
   switch (code) {
-    case -2: return 'Network Error';
-    case -6: return 'File Not Found';
-    case -7: return 'Too Many Redirects';
-    case -100: return 'Connection Closed';
-    case -101: return 'Connection Reset';
-    case -102: return 'Connection Refused';
-    case -103: return 'Connection Failed';
-    case -104: return 'Connection Timed Out';
-    case -105: return 'Could Not Resolve Host';
-    case -106: return 'No Internet Connection';
-    case -109: return 'Address Unreachable';
-    case -118: return 'Connection Timed Out';
-    case -200: return 'Certificate Error';
-    case -201: return 'Certificate Date Invalid';
-    case -202: return 'Certificate Authority Invalid';
-    default: return 'This Page Could Not Be Loaded';
+    case -2:
+      return 'Network Error';
+    case -6:
+      return 'File Not Found';
+    case -7:
+      return 'Too Many Redirects';
+    case -100:
+      return 'Connection Closed';
+    case -101:
+      return 'Connection Reset';
+    case -102:
+      return 'Connection Refused';
+    case -103:
+      return 'Connection Failed';
+    case -104:
+      return 'Connection Timed Out';
+    case -105:
+      return 'Could Not Resolve Host';
+    case -106:
+      return 'No Internet Connection';
+    case -109:
+      return 'Address Unreachable';
+    case -118:
+      return 'Connection Timed Out';
+    case -200:
+      return 'Certificate Error';
+    case -201:
+      return 'Certificate Date Invalid';
+    case -202:
+      return 'Certificate Authority Invalid';
+    default:
+      return 'This Page Could Not Be Loaded';
   }
 }
 
@@ -283,7 +309,7 @@ describe('TabManager - escapeHtml', () => {
   });
 
   it('escapes single quotes', () => {
-    expect(escapeHtml("it's")).toBe("it&#39;s");
+    expect(escapeHtml("it's")).toBe('it&#39;s');
   });
 
   it('handles multiple escapes together', () => {

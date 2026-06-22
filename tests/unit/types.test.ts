@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { IPC_CHANNELS } from '../../src/shared/types';
-import { APP_NAME, DEFAULT_URL, NEW_TAB_URL, TAB_BAR_HEIGHT, NAV_BAR_HEIGHT, HEADER_HEIGHT } from '../../src/shared/constants';
+import {
+  APP_NAME,
+  DEFAULT_URL,
+  NEW_TAB_URL,
+  TAB_BAR_HEIGHT,
+  NAV_BAR_HEIGHT,
+  HEADER_HEIGHT,
+} from '../../src/shared/constants';
 
 describe('IPC_CHANNELS', () => {
   it('has all tab channels defined', () => {

@@ -2,7 +2,7 @@ import { autoUpdater, UpdateInfo } from 'electron-updater';
 import { ipcMain } from 'electron';
 import log from 'electron-log/main';
 
-type WebContentsSender = { send: (channel: string, ...args: any[]) => void };
+type WebContentsSender = { send: (channel: string, ...args: unknown[]) => void };
 
 export class AutoUpdater {
   private appViewSender: WebContentsSender;
