@@ -16,11 +16,11 @@ The target product should let a user:
 
 ## Current State
 
-Branch: `analizar-estado-proyecto`
+Branch: `master`
 
-Current PR: https://github.com/Steve-XYZ/mytube/pull/1
+Latest stabilization merge: https://github.com/Steve-XYZ/mytube/pull/1
 
-The project is in stabilization. The app shell, browser tab system, preload bridge, download managers, settings UI, and unit tests exist. Local validation is healthy, but media binary setup, packaging, CI, end-to-end testing, and release hardening still need work.
+The project is in post-stabilization pre-release. The app shell, browser tab system, preload bridge, download managers, settings UI, and unit tests exist. Local validation is healthy, media binaries can be installed through `pnpm run setup`, and representative video/image download flows have been smoke-tested. Packaging, CI, end-to-end testing, and release hardening still need work.
 
 ### Confirmed Working
 
@@ -35,12 +35,21 @@ The project is in stabilization. The app shell, browser tab system, preload brid
 - Prettier check passes.
 - Corrupted `downloads.json` is backed up and reset instead of repeatedly breaking launch.
 - App-shell CSP is scoped to the shell WebContents so it does not break external browser tabs.
+- Action panels render above browser tabs and stay clickable.
+- Image gallery detects page images, reports batch progress, saves images, and can reveal files in Finder.
+- `pnpm run setup` installs/copies `yt-dlp`, `ffmpeg`, `ffprobe`, and the optional YouTube PO-token provider.
+- `yt-dlp` uses Node JS runtime detection, resilient socket/retry flags, selected format persistence, and public YouTube extraction without relying on Google login inside Electron.
+- Video metadata requests are deduplicated per URL and cached briefly.
+- Video metadata extraction no longer has a 30-second hard timeout; it uses a 10-minute maximum and a 2-minute no-output stall guard.
+- Public YouTube download smoke tests pass with the local PO-token provider.
+- Image download smoke testing saved files under `~/Downloads/MyTube/Images`.
 
 ### Known Limitations
 
-- `pnpm run setup` still depends on external binary downloads. The script starts correctly and is safer now, but the GitHub `yt-dlp` download was too slow and failed/cut during local attempts.
-- `bin/` is ignored and currently empty in this workspace.
-- Video/audio download flows cannot be fully validated until `yt-dlp`, `ffmpeg`, and `ffprobe` are present.
+- `pnpm run setup` depends on external binary/provider downloads and npm install for the PO-token provider.
+- `bin/` is ignored by git and must be populated per checkout.
+- The PO-token provider is an external component pinned to `bgutil-ytdlp-pot-provider` `1.3.1` commit `7608dd51ee813b48cf9a6d68c6e42cb197ce10e0`; its dependency tree needs production security review.
+- YouTube can still reject anonymous guest sessions for specific videos/networks before formats are returned, even with PO-token support.
 - Packaging has not been verified end-to-end.
 - No GitHub Actions CI exists yet.
 - No E2E coverage exists for browser navigation, tabs, download flows, or packaging smoke tests.
@@ -61,30 +70,41 @@ pnpm run build:all
 pnpm run dev:electron
 ```
 
-`pnpm run setup` is required for media download validation, but it is currently blocked by unreliable external downloads in this environment.
+Run this before validating media flows on a fresh checkout:
+
+```bash
+pnpm run setup
+```
+
+Recent local smoke evidence:
+
+- Public YouTube download through `yt-dlp` + PO-token provider produced an MP4.
+- A 44:34 YouTube video returned metadata and 40 formats without the previous app timeout.
+- Image download flow saved detected page images and reported results in the UI.
 
 ## Work Remaining
 
 ### 1. Stabilize Binary Setup
 
-Goal: make `pnpm run setup` reliably populate `bin/` on supported platforms.
+Goal: make `pnpm run setup` reproducible and auditable on supported platforms.
 
 Tasks:
 
-- Add resumable downloads for `yt-dlp` and ffmpeg archives, or switch to a more reliable source strategy.
-- Validate file size/checksum before moving any downloaded binary into place.
+- Add checksum validation for downloaded binaries and provider artifacts.
 - Print actionable errors when a provider fails.
 - Support already-installed local binaries as a fallback (`yt-dlp`, `ffmpeg`, `ffprobe` from PATH).
 - Verify setup on macOS arm64.
 - Verify setup on macOS x64.
 - Verify setup on Windows x64.
 - Document manual binary placement for offline/dev fallback.
+- Audit the PO-token provider dependency tree before production packaging.
 
 Acceptance:
 
 - `pnpm run setup` completes from a clean checkout.
-- `bin/yt-dlp`, `bin/ffmpeg`, and `bin/ffprobe` exist and are executable where applicable.
+- `bin/yt-dlp`, `bin/ffmpeg`, `bin/ffprobe`, and the optional PO-token provider exist where applicable.
 - `yt-dlp --version` and `ffmpeg -version` pass through the app-resolved paths.
+- Setup failures leave no partial executable artifacts behind.
 
 ### 2. Validate Core Browser Experience
 
@@ -122,6 +142,8 @@ Tasks:
 - Verify download queue persistence across restart.
 - Verify missing-binary UI/error path is user-friendly.
 - Verify logs do not leak excessive provider output into UI.
+- Verify large-file behavior with long videos and slow downloads.
+- Add explicit test coverage for metadata request deduplication and timeout policy.
 
 Acceptance:
 
@@ -129,6 +151,7 @@ Acceptance:
 - A user can download audio-only from a supported public video.
 - Failed/unsupported URLs produce clear errors.
 - Queue state survives restart without corrupting app launch.
+- Long videos do not fail due to an app-level short timeout.
 
 ### 4. Validate Image Detection and Downloads
 
@@ -290,14 +313,16 @@ Acceptance:
 
 Scope:
 
-- Merge PR #1 after review.
+- Merge PR #1 after local validation.
 - Keep docs honest.
 - Keep local validation green.
 
 Exit criteria:
 
-- PR #1 approved and merged.
+- PR #1 merged to `master`.
 - `master` passes local baseline commands.
+
+Status: complete.
 
 ### Milestone 2: Binary Setup and Media Smoke
 
@@ -306,11 +331,14 @@ Scope:
 - Make `pnpm run setup` reliable.
 - Populate `bin/`.
 - Prove one video download and one audio download.
+- Prove one image batch download.
 
 Exit criteria:
 
 - Setup completes from clean checkout.
 - Media download smoke test passes on macOS.
+
+Status: partially complete on the current macOS workspace. Windows and clean-machine verification remain.
 
 ### Milestone 3: Browser and Download E2E
 
@@ -349,17 +377,19 @@ Exit criteria:
 
 ## Immediate Next Actions
 
-1. Finish review/merge of PR #1.
-2. Fix binary setup reliability or add a deterministic local-binary fallback.
-3. Add CI for the current validation baseline.
-4. Add first Electron E2E smoke test.
-5. Validate packaged app launch with `pnpm run pack`.
+1. Add GitHub Actions CI for the current validation baseline.
+2. Add first Electron E2E smoke test for launch, navigation, tabs, and one mocked download flow.
+3. Verify `pnpm run setup` on a clean macOS arm64 checkout and document any manual fallback.
+4. Validate packaged app launch with `pnpm run pack`.
+5. Audit the PO-token provider and define the production packaging/security stance.
 
 ## Current Risk Register
 
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
-| External binary downloads are unreliable | Blocks media download validation | Add retries, resume support, checksum validation, and PATH/manual fallback |
+| External binary/provider downloads are unreliable | Blocks media setup on clean machines | Keep partial-download safety, add checksum validation, and document PATH/manual fallback |
+| External PO-token provider has its own dependency tree | Supply-chain/security risk for production builds | Pin commits, audit dependencies, and decide whether to bundle, install on setup, or make optional |
+| YouTube can reject anonymous guest sessions | Some public videos still cannot be extracted | Surface clear errors, avoid embedded Google login, and consider browser-captured signed media URLs as a future fallback |
 | Packaged binary resolution unverified | Downloads may work in dev but fail in release | Add packaged smoke test |
 | No CI | Regressions can merge unnoticed | Add PR workflow before larger feature work |
 | Live media sites change behavior | Tests can become flaky | Use mocked binaries for CI and live smoke tests only manually |

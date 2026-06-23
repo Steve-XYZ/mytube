@@ -4,29 +4,33 @@ MyTube is an Electron desktop app that combines a Chromium-based browser shell w
 
 ## Current Status
 
-This repository is in active stabilization. The core app structure exists and the TypeScript/test/build gates pass locally, but it should not be treated as production-ready yet.
+This repository is past the first stabilization pass. The core Electron app starts locally, the TypeScript/test/lint/build gates pass, and the main video/image download flows have been smoke-tested with local media binaries. It should still be treated as pre-release software until CI, E2E coverage, packaging, and signing are completed.
 
 Working areas:
 
 - Electron main process with `BaseWindow` and `WebContentsView` tabs.
 - React renderer shell with tabs, navigation, find-in-page, settings, downloads, image gallery, and toast UI.
 - Preload bridge using `contextBridge`.
-- Video download wrapper around packaged `yt-dlp`.
-- Image scanning and download support.
+- Video/audio download wrapper around packaged `yt-dlp`, `ffmpeg`, and `ffprobe`.
+- YouTube public-mode extraction with optional local PO-token provider support.
+- Image scanning, batch download progress, and Finder reveal support.
 - JSON-backed settings and download history.
 - Unit tests for core main-process logic.
 
 Known gaps:
 
-- Electron needs its postinstall script to run successfully after install.
-- `bin/` is generated locally and must be populated with `yt-dlp`, `ffmpeg`, `ffprobe`, and the optional YouTube PO-token provider before the broadest media download coverage works.
+- `bin/` is generated locally and ignored by git; `pnpm run setup` must populate it before media download flows work on a fresh checkout.
 - Packaging/signing/notarization has not been fully verified.
 - There is no CI workflow yet.
+- There is no automated E2E coverage yet.
+- YouTube can still reject anonymous guest sessions for some videos/networks before downloadable formats are returned.
+- The PO-token provider is an external setup-time component and should be reviewed before production distribution.
 - Test code still uses a few casts around mocked Electron and Node APIs.
 
 ## Requirements
 
 - Node.js compatible with the current dependency set.
+- Node.js 20 or newer is required for the optional YouTube PO-token provider installed by `pnpm run setup`.
 - pnpm 10.x. The repo currently declares `pnpm@10.29.3`.
 - macOS or Windows for full Electron app usage.
 
@@ -75,10 +79,11 @@ pnpm run lint
 pnpm run format:check
 ```
 
-Run the full build:
+Run the full build and local Electron smoke:
 
 ```bash
 pnpm run build:all
+pnpm run dev:electron
 ```
 
 Package locally:
@@ -118,6 +123,13 @@ The repository guidance mentions `electron-store` and SQLite as target architect
 The packaged app expects these files through `electron-builder.yml` `extraResources`.
 
 YouTube currently enforces Proof-of-Origin tokens for some clients and traffic patterns. MyTube does not rely on Google login inside the Electron browser because Google can mark embedded browsers as untrusted. Instead, the main process calls `yt-dlp` in public mode first, skips exporting YouTube cookies by default, and uses the local PO-token provider when `pnpm run setup` has installed it.
+
+Current media validation evidence:
+
+- Image downloads save under `~/Downloads/MyTube/Images` in development and report success/failure in the UI.
+- A known public YouTube video downloaded successfully through `yt-dlp` with the PO-token provider enabled.
+- A 44:34 YouTube video was used as a metadata smoke test and returned 40 formats without hitting the previous 30-second app timeout.
+- Some YouTube videos can still return `LOGIN_REQUIRED` even with PO-token support; those are upstream guest-session/IP restrictions rather than a supported login flow inside the app.
 
 ## Release Readiness Checklist
 
