@@ -77,6 +77,7 @@ export const IPC_CHANNELS = {
   TAB_STOP: 'tab:stop',
   TAB_UPDATE: 'tab:update',
   TAB_LIST: 'tab:list',
+  TAB_ACTIVE_GET: 'tab:active-get',
   TAB_ACTIVE_CHANGED: 'tab:active-changed',
 
   // Zoom
@@ -119,6 +120,7 @@ export const IPC_CHANNELS = {
   // App
   APP_GET_VERSION: 'app:get-version',
   APP_SELECT_DIRECTORY: 'app:select-directory',
+  APP_SHELL_OVERLAY_SET: 'app:shell-overlay-set',
 } as const;
 
 // ===== Find In Page =====

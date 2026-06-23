@@ -61,6 +61,7 @@ export class TabManager {
     ipcMain.handle(IPC_CHANNELS.TAB_RELOAD, () => this.reload());
     ipcMain.handle(IPC_CHANNELS.TAB_STOP, () => this.stopLoading());
     ipcMain.handle(IPC_CHANNELS.TAB_LIST, () => this.getTabList());
+    ipcMain.handle(IPC_CHANNELS.TAB_ACTIVE_GET, () => this.getActiveTabId());
 
     // Zoom
     ipcMain.handle(IPC_CHANNELS.ZOOM_IN, () => this.zoomIn());
@@ -900,6 +901,7 @@ export class TabManager {
     ipcMain.removeHandler(IPC_CHANNELS.TAB_RELOAD);
     ipcMain.removeHandler(IPC_CHANNELS.TAB_STOP);
     ipcMain.removeHandler(IPC_CHANNELS.TAB_LIST);
+    ipcMain.removeHandler(IPC_CHANNELS.TAB_ACTIVE_GET);
     ipcMain.removeHandler(IPC_CHANNELS.ZOOM_IN);
     ipcMain.removeHandler(IPC_CHANNELS.ZOOM_OUT);
     ipcMain.removeHandler(IPC_CHANNELS.ZOOM_RESET);

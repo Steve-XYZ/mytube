@@ -21,6 +21,7 @@ describe('IPC_CHANNELS', () => {
     expect(IPC_CHANNELS.TAB_STOP).toBe('tab:stop');
     expect(IPC_CHANNELS.TAB_UPDATE).toBe('tab:update');
     expect(IPC_CHANNELS.TAB_LIST).toBe('tab:list');
+    expect(IPC_CHANNELS.TAB_ACTIVE_GET).toBe('tab:active-get');
     expect(IPC_CHANNELS.TAB_ACTIVE_CHANGED).toBe('tab:active-changed');
   });
 
@@ -45,6 +46,7 @@ describe('IPC_CHANNELS', () => {
     expect(IPC_CHANNELS.SETTINGS_GET).toBe('settings:get');
     expect(IPC_CHANNELS.SETTINGS_SET).toBe('settings:set');
     expect(IPC_CHANNELS.SETTINGS_GET_ALL).toBe('settings:get-all');
+    expect(IPC_CHANNELS.APP_SHELL_OVERLAY_SET).toBe('app:shell-overlay-set');
   });
 
   it('has zoom channels defined', () => {

@@ -13,6 +13,7 @@ const IPC_CHANNELS = {
   TAB_STOP: 'tab:stop',
   TAB_UPDATE: 'tab:update',
   TAB_LIST: 'tab:list',
+  TAB_ACTIVE_GET: 'tab:active-get',
   TAB_ACTIVE_CHANGED: 'tab:active-changed',
   ZOOM_IN: 'zoom:in',
   ZOOM_OUT: 'zoom:out',
@@ -38,6 +39,7 @@ const IPC_CHANNELS = {
   SETTINGS_GET_ALL: 'settings:get-all',
   APP_GET_VERSION: 'app:get-version',
   APP_SELECT_DIRECTORY: 'app:select-directory',
+  APP_SHELL_OVERLAY_SET: 'app:shell-overlay-set',
 } as const;
 
 const electronAPI = {
@@ -51,6 +53,7 @@ const electronAPI = {
   reload: () => ipcRenderer.invoke(IPC_CHANNELS.TAB_RELOAD),
   stopLoading: () => ipcRenderer.invoke(IPC_CHANNELS.TAB_STOP),
   getTabs: () => ipcRenderer.invoke(IPC_CHANNELS.TAB_LIST),
+  getActiveTabId: () => ipcRenderer.invoke(IPC_CHANNELS.TAB_ACTIVE_GET),
 
   // Zoom
   zoomIn: () => ipcRenderer.invoke(IPC_CHANNELS.ZOOM_IN),
@@ -95,6 +98,7 @@ const electronAPI = {
   // App
   getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION),
   selectDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.APP_SELECT_DIRECTORY),
+  setShellOverlayOpen: (open: boolean) => ipcRenderer.invoke(IPC_CHANNELS.APP_SHELL_OVERLAY_SET, open),
 
   // === Event listeners (main -> renderer) ===
 

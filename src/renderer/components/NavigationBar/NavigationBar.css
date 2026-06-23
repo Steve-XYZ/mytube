@@ -107,7 +107,7 @@
 }
 
 .nav-btn-download-idle {
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .nav-btn-download-detecting {

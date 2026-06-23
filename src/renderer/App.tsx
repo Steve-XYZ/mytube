@@ -71,6 +71,12 @@ export default function App() {
 
   const mediaState: MediaDetectionState = activeTab?.mediaState || 'none';
   const activeUrl = activeTab?.url || '';
+  const shellOverlayOpen =
+    findVisible || downloadPanelVisible || Boolean(formatSelectorUrl) || imageGalleryVisible || settingsVisible;
+
+  useEffect(() => {
+    window.electronAPI.setShellOverlayOpen(shellOverlayOpen);
+  }, [shellOverlayOpen]);
 
   // Cmd+D: download media from current page
   useEffect(() => {
