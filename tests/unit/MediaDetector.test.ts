@@ -200,6 +200,7 @@ describe('MediaDetector', () => {
       expect(ipcMain.removeHandler).toHaveBeenCalledWith('media:scan-images');
       expect(ipcMain.removeHandler).toHaveBeenCalledWith('media:download-image');
       expect(ipcMain.removeHandler).toHaveBeenCalledWith('media:download-images-batch');
+      expect(ipcMain.removeHandler).toHaveBeenCalledWith('media:show-image-in-folder');
     });
 
     it('clears allowed webContentsIds', () => {

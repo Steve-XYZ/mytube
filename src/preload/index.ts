@@ -89,6 +89,7 @@ const electronAPI = {
     images: Array<{ url: string; filename?: string }>,
     options?: { referer?: string; subDir?: string },
   ) => ipcRenderer.invoke('media:download-images-batch', images, options),
+  showImageInFolder: (filePath: string) => ipcRenderer.invoke('media:show-image-in-folder', filePath),
 
   // Settings
   getSetting: (key: string) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET, key),

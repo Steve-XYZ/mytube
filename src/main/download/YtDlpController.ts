@@ -1,7 +1,8 @@
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
-import { app } from 'electron';
+import { randomUUID } from 'crypto';
+import { app, session, type Cookie } from 'electron';
 import { VideoInfo, VideoFormat } from '../../shared/types';
 import log from 'electron-log/main';
 
@@ -53,10 +54,12 @@ export class YtDlpController {
   private ffmpegPath: string;
   private activeProcesses: Map<string, ChildProcess> = new Map();
   private binariesAvailable: boolean = false;
+  private nodeRuntimePath: string | null = null;
 
   constructor() {
     this.ytdlpPath = this.resolveBinaryPath('yt-dlp');
     this.ffmpegPath = this.resolveBinaryDir();
+    this.nodeRuntimePath = this.resolveNodeRuntimePath();
 
     // Verify binaries exist at startup
     this.binariesAvailable = fs.existsSync(this.ytdlpPath);
@@ -69,6 +72,9 @@ export class YtDlpController {
 
     log.info(`yt-dlp path: ${this.ytdlpPath} (exists: ${this.binariesAvailable})`);
     log.info(`ffmpeg dir: ${this.ffmpegPath}`);
+    if (this.nodeRuntimePath) {
+      log.info(`yt-dlp JS runtime: ${this.nodeRuntimePath}`);
+    }
   }
 
   /** Check if yt-dlp binary is available */
@@ -94,6 +100,23 @@ export class YtDlpController {
       return path.join(process.resourcesPath, 'bin');
     }
     return path.join(app.getAppPath(), 'bin');
+  }
+
+  private resolveNodeRuntimePath(): string | null {
+    const pathDirs = (process.env.PATH || '').split(path.delimiter);
+    const executable = process.platform === 'win32' ? 'node.exe' : 'node';
+
+    for (const dir of pathDirs) {
+      const candidate = path.join(dir, executable);
+      try {
+        fs.accessSync(candidate, fs.constants.X_OK);
+        return candidate;
+      } catch {
+        // Try next PATH entry.
+      }
+    }
+
+    return null;
   }
 
   /** Validate that a URL is safe to pass to yt-dlp */
@@ -125,7 +148,7 @@ export class YtDlpController {
       throw new Error('yt-dlp binary not found. Please reinstall the application.');
     }
 
-    const output = await this.execYtDlp(['--dump-json', '--no-playlist', '--no-warnings', url]);
+    const output = await this.execYtDlp(['--dump-json', '--no-playlist', '--no-warnings', url], url);
 
     const data = JSON.parse(output) as YtDlpJson;
 
@@ -162,14 +185,14 @@ export class YtDlpController {
     return this.simplifyFormats(info.formats);
   }
 
-  download(
+  async download(
     downloadId: string,
     url: string,
     options: DownloadOptions,
     onProgress: ProgressCallback,
     onComplete: CompleteCallback,
     onError: ErrorCallback,
-  ): void {
+  ): Promise<void> {
     if (!YtDlpController.validateUrl(url)) {
       onError('Invalid URL: only http and https URLs are supported');
       return;
@@ -179,7 +202,7 @@ export class YtDlpController {
       return;
     }
 
-    const args: string[] = ['--newline', '--no-playlist', '--ffmpeg-location', this.ffmpegPath, '--no-warnings'];
+    const args: string[] = ['--newline', '--no-playlist', '--no-warnings'];
 
     // Format selection
     if (options.audioOnly) {
@@ -203,9 +226,18 @@ export class YtDlpController {
     // Add URL
     args.push(url);
 
-    log.info(`Starting download ${downloadId}: yt-dlp ${args.join(' ')}`);
+    let fullArgs: string[];
+    let cleanup: () => void;
+    try {
+      ({ args: fullArgs, cleanup } = await this.withCommonArgs(args, url));
+    } catch (err: unknown) {
+      onError(err instanceof Error ? err.message : String(err));
+      return;
+    }
 
-    const proc = spawn(this.ytdlpPath, args, {
+    log.info(`Starting download ${downloadId}: yt-dlp ${fullArgs.join(' ')}`);
+
+    const proc = spawn(this.ytdlpPath, fullArgs, {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -249,6 +281,7 @@ export class YtDlpController {
 
     proc.on('close', (code) => {
       this.activeProcesses.delete(downloadId);
+      cleanup();
 
       if (code === 0) {
         log.info(`Download ${downloadId} completed: ${lastFilename}`);
@@ -265,6 +298,7 @@ export class YtDlpController {
 
     proc.on('error', (err: NodeJS.ErrnoException) => {
       this.activeProcesses.delete(downloadId);
+      cleanup();
       log.error(`Download ${downloadId} process error:`, err);
       if (err.code === 'ENOENT') {
         this.binariesAvailable = false;
@@ -290,47 +324,116 @@ export class YtDlpController {
     this.activeProcesses.clear();
   }
 
-  private async execYtDlp(args: string[]): Promise<string> {
+  private async execYtDlp(args: string[], sourceUrl?: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const fullArgs = ['--ffmpeg-location', this.ffmpegPath, ...args];
-      const proc = spawn(this.ytdlpPath, fullArgs, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
+      this.withCommonArgs(args, sourceUrl)
+        .then(({ args: fullArgs, cleanup }) => {
+          const proc = spawn(this.ytdlpPath, fullArgs, {
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
 
-      let stdout = '';
-      let stderr = '';
+          let stdout = '';
+          let stderr = '';
+          let settled = false;
 
-      proc.stdout?.on('data', (data: Buffer) => {
-        stdout += data.toString();
-      });
+          const timeout = setTimeout(() => {
+            proc.kill('SIGTERM');
+            finish(() => reject(new Error('yt-dlp timed out')));
+          }, 30000);
 
-      proc.stderr?.on('data', (data: Buffer) => {
-        stderr += data.toString();
-      });
+          const finish = (fn: () => void) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            cleanup();
+            fn();
+          };
 
-      proc.on('close', (code) => {
-        if (code === 0) {
-          resolve(stdout.trim());
-        } else {
-          reject(new Error(`yt-dlp exited with code ${code}: ${stderr.trim()}`));
-        }
-      });
+          proc.stdout?.on('data', (data: Buffer) => {
+            stdout += data.toString();
+          });
 
-      proc.on('error', (err: NodeJS.ErrnoException) => {
-        if (err.code === 'ENOENT') {
-          this.binariesAvailable = false;
-          reject(new Error('yt-dlp binary not found. Please reinstall the application.'));
-        } else {
-          reject(new Error(`Failed to execute yt-dlp: ${err.message}`));
-        }
-      });
+          proc.stderr?.on('data', (data: Buffer) => {
+            stderr += data.toString();
+          });
 
-      // Timeout after 30 seconds for info queries
-      setTimeout(() => {
-        proc.kill('SIGTERM');
-        reject(new Error('yt-dlp timed out'));
-      }, 30000);
+          proc.on('close', (code) => {
+            if (code === 0) {
+              finish(() => resolve(stdout.trim()));
+            } else {
+              finish(() => reject(new Error(`yt-dlp exited with code ${code}: ${stderr.trim()}`)));
+            }
+          });
+
+          proc.on('error', (err: NodeJS.ErrnoException) => {
+            if (err.code === 'ENOENT') {
+              this.binariesAvailable = false;
+              finish(() => reject(new Error('yt-dlp binary not found. Please reinstall the application.')));
+            } else {
+              finish(() => reject(new Error(`Failed to execute yt-dlp: ${err.message}`)));
+            }
+          });
+        })
+        .catch((err: unknown) => {
+          reject(err instanceof Error ? err : new Error(String(err)));
+        });
     });
+  }
+
+  private async withCommonArgs(args: string[], sourceUrl?: string): Promise<{ args: string[]; cleanup: () => void }> {
+    const commonArgs = ['--ffmpeg-location', this.ffmpegPath];
+    const cleanupCallbacks: Array<() => void> = [];
+
+    if (this.nodeRuntimePath) {
+      commonArgs.push('--js-runtimes', `node:${this.nodeRuntimePath}`);
+    }
+
+    if (sourceUrl) {
+      const cookieFilePath = await this.writeCookieFile(sourceUrl);
+      if (cookieFilePath) {
+        commonArgs.push('--cookies', cookieFilePath);
+        cleanupCallbacks.push(() => fs.unlink(cookieFilePath, () => {}));
+      }
+    }
+
+    return {
+      args: [...commonArgs, ...args],
+      cleanup: () => {
+        for (const callback of cleanupCallbacks) {
+          callback();
+        }
+      },
+    };
+  }
+
+  private async writeCookieFile(sourceUrl: string): Promise<string | null> {
+    try {
+      const cookies = await session.defaultSession.cookies.get({ url: sourceUrl });
+      if (!cookies.length) return null;
+
+      const filePath = path.join(app.getPath('userData'), `yt-dlp-cookies-${randomUUID()}.txt`);
+      const lines = [
+        '# Netscape HTTP Cookie File',
+        '# Generated by MyTube for a local yt-dlp request.',
+        ...cookies.map((cookie) => this.formatCookie(cookie, sourceUrl)),
+      ];
+      fs.writeFileSync(filePath, `${lines.join('\n')}\n`, { mode: 0o600 });
+      return filePath;
+    } catch (err: unknown) {
+      log.warn('Could not export Electron session cookies for yt-dlp:', err instanceof Error ? err.message : String(err));
+      return null;
+    }
+  }
+
+  private formatCookie(cookie: Cookie, sourceUrl: string): string {
+    const sourceHost = new URL(sourceUrl).hostname;
+    const rawDomain = cookie.domain || sourceHost;
+    const domain = cookie.httpOnly ? `#HttpOnly_${rawDomain}` : rawDomain;
+    const includeSubdomains = rawDomain.startsWith('.') ? 'TRUE' : 'FALSE';
+    const pathName = cookie.path || '/';
+    const secure = cookie.secure ? 'TRUE' : 'FALSE';
+    const expires = Math.floor(cookie.expirationDate || 0);
+    return [domain, includeSubdomains, pathName, secure, expires, cookie.name, cookie.value].join('\t');
   }
 
   private parseProgressLine(line: string): DownloadProgress | null {

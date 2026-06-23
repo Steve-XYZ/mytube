@@ -58,6 +58,11 @@ export class MediaDetector {
         return results;
       },
     );
+
+    ipcMain.handle('media:show-image-in-folder', (_event, filePath: string) => {
+      if (typeof filePath !== 'string') return false;
+      return this.imageDownloader.showInFolder(filePath);
+    });
   }
 
   async scanPageImages(webContentsId: number): Promise<DetectedImage[]> {
@@ -179,6 +184,7 @@ export class MediaDetector {
     ipcMain.removeHandler('media:scan-images');
     ipcMain.removeHandler('media:download-image');
     ipcMain.removeHandler('media:download-images-batch');
+    ipcMain.removeHandler('media:show-image-in-folder');
     this.allowedWebContentsIds.clear();
   }
 }

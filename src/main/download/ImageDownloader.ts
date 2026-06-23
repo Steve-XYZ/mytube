@@ -2,7 +2,7 @@ import * as https from 'https';
 import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
-import { app } from 'electron';
+import { app, shell } from 'electron';
 import { randomUUID } from 'crypto';
 import log from 'electron-log/main';
 
@@ -69,24 +69,36 @@ export class ImageDownloader {
 
     const results: ImageDownloadResult[] = [];
     const total = images.length;
+    let completed = 0;
 
     // Download in batches of 5 to avoid overwhelming the network
     const batchSize = 5;
     for (let i = 0; i < images.length; i += batchSize) {
       const batch = images.slice(i, i + batchSize);
       const batchResults = await Promise.all(
-        batch.map((img) =>
-          this.downloadImage(img.url, {
+        batch.map(async (img) => {
+          const result = await this.downloadImage(img.url, {
             savePath: path.join(dir, img.filename || this.getFilenameFromUrl(img.url)),
             referer: options?.referer,
-          }),
-        ),
+          });
+          completed++;
+          onProgress?.(completed, total);
+          return result;
+        }),
       );
       results.push(...batchResults);
-      onProgress?.(Math.min(i + batchSize, total), total);
     }
 
     return results;
+  }
+
+  showInFolder(filePath: string): boolean {
+    const resolved = path.resolve(filePath);
+    if (!resolved.startsWith(path.resolve(this.defaultDir)) || !fs.existsSync(resolved)) {
+      return false;
+    }
+    shell.showItemInFolder(resolved);
+    return true;
   }
 
   setDefaultDir(dir: string): void {
@@ -119,17 +131,20 @@ export class ImageDownloader {
           response.statusCode < 400 &&
           response.headers.location
         ) {
+          response.resume();
           if (redirectCount >= 5) {
             reject(new Error('Too many redirects'));
             return;
           }
-          this.httpDownload(response.headers.location, destPath, referer, redirectCount + 1)
+          const redirectedUrl = new URL(response.headers.location, url).toString();
+          this.httpDownload(redirectedUrl, destPath, referer, redirectCount + 1)
             .then(resolve)
             .catch(reject);
           return;
         }
 
         if (response.statusCode && response.statusCode !== 200) {
+          response.resume();
           reject(new Error(`HTTP ${response.statusCode}`));
           return;
         }
@@ -140,16 +155,36 @@ export class ImageDownloader {
         }
 
         const file = fs.createWriteStream(destPath);
+        let settled = false;
+
+        const fail = (err: Error) => {
+          if (settled) return;
+          settled = true;
+          file.destroy();
+          fs.unlink(destPath, () => {});
+          reject(err);
+        };
+
         response.pipe(file);
 
+        response.on('error', fail);
+        response.on('aborted', () => fail(new Error('Response aborted')));
+
         file.on('finish', () => {
-          file.close();
-          resolve();
+          if (settled) return;
+          settled = true;
+          file.close((err) => {
+            if (err) {
+              fs.unlink(destPath, () => {});
+              reject(err);
+              return;
+            }
+            resolve();
+          });
         });
 
         file.on('error', (err) => {
-          fs.unlink(destPath, () => {});
-          reject(err);
+          fail(err);
         });
       });
 

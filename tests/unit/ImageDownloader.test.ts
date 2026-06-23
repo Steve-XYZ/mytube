@@ -12,7 +12,10 @@ vi.mock('fs', async () => {
       on: vi.fn((event: string, cb: () => void) => {
         if (event === 'finish') setTimeout(cb, 0);
       }),
-      close: vi.fn(),
+      close: vi.fn((cb?: () => void) => {
+        cb?.();
+      }),
+      destroy: vi.fn(),
     })),
     unlink: vi.fn(),
   };

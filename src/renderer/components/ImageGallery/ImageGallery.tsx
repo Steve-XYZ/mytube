@@ -10,6 +10,12 @@ interface DetectedImage {
   naturalHeight: number;
 }
 
+interface ImageDownloadResult {
+  success: boolean;
+  filePath?: string;
+  error?: string;
+}
+
 interface ImageGalleryProps {
   visible: boolean;
   webContentsId: number | null;
@@ -23,12 +29,19 @@ export function ImageGallery({ visible, webContentsId, pageUrl, onClose }: Image
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState<{ completed: number; total: number } | null>(null);
+  const [downloadResult, setDownloadResult] = useState<{
+    successCount: number;
+    failureCount: number;
+    firstFilePath?: string;
+    error?: string;
+  } | null>(null);
 
   const scanImages = useCallback(async (targetWebContentsId: number) => {
     setLoading(true);
     setImages([]);
     setSelected(new Set());
     setProgress(null);
+    setDownloadResult(null);
 
     try {
       const result = await window.electronAPI.scanPageImages(targetWebContentsId);
@@ -83,6 +96,7 @@ export function ImageGallery({ visible, webContentsId, pageUrl, onClose }: Image
 
     setDownloading(true);
     setProgress({ completed: 0, total: selected.size });
+    setDownloadResult(null);
 
     const batch = images.filter((img) => selected.has(img.url)).map((img) => ({ url: img.url, filename: undefined }));
 
@@ -94,9 +108,22 @@ export function ImageGallery({ visible, webContentsId, pageUrl, onClose }: Image
     }
 
     try {
-      await window.electronAPI.downloadImagesBatch(batch, { referer });
+      const results = (await window.electronAPI.downloadImagesBatch(batch, { referer })) as ImageDownloadResult[];
+      const successes = results.filter((result) => result.success);
+      const failures = results.filter((result) => !result.success);
+      setDownloadResult({
+        successCount: successes.length,
+        failureCount: failures.length,
+        firstFilePath: successes[0]?.filePath,
+        error: failures[0]?.error,
+      });
     } catch (error) {
       console.error('Failed to download selected images:', error);
+      setDownloadResult({
+        successCount: 0,
+        failureCount: selected.size,
+        error: error instanceof Error ? error.message : 'Download failed',
+      });
     }
 
     setDownloading(false);
@@ -111,10 +138,23 @@ export function ImageGallery({ visible, webContentsId, pageUrl, onClose }: Image
       } catch {
         referer = undefined;
       }
-      await window.electronAPI.downloadImage(url, referer);
+      setDownloadResult(null);
+      const result = (await window.electronAPI.downloadImage(url, referer)) as ImageDownloadResult;
+      setDownloadResult({
+        successCount: result.success ? 1 : 0,
+        failureCount: result.success ? 0 : 1,
+        firstFilePath: result.filePath,
+        error: result.error,
+      });
     },
     [pageUrl],
   );
+
+  const handleShowInFolder = useCallback(() => {
+    if (downloadResult?.firstFilePath) {
+      window.electronAPI.showImageInFolder(downloadResult.firstFilePath);
+    }
+  }, [downloadResult]);
 
   if (!visible) return null;
 
@@ -164,6 +204,24 @@ export function ImageGallery({ visible, webContentsId, pageUrl, onClose }: Image
                 </button>
               </div>
             </div>
+
+            {downloadResult && (
+              <div className={`image-gallery-result ${downloadResult.failureCount > 0 ? 'has-errors' : ''}`}>
+                <span>
+                  {downloadResult.successCount > 0 &&
+                    `${downloadResult.successCount} image${downloadResult.successCount === 1 ? '' : 's'} saved`}
+                  {downloadResult.failureCount > 0 &&
+                    `${downloadResult.successCount > 0 ? ' · ' : ''}${downloadResult.failureCount} failed${
+                      downloadResult.error ? `: ${downloadResult.error}` : ''
+                    }`}
+                </span>
+                {downloadResult.firstFilePath && (
+                  <button className="image-gallery-btn-text" onClick={handleShowInFolder}>
+                    Show in Finder
+                  </button>
+                )}
+              </div>
+            )}
 
             <div className="image-gallery-grid">
               {images.map((img) => (

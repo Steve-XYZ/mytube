@@ -94,7 +94,7 @@ export class DownloadManager {
         return await this.ytdlp.getVideoInfo(url);
       } catch (err: unknown) {
         log.error('Failed to get media info:', getErrorMessage(err));
-        return null;
+        return { error: getUserFacingYtDlpError(err) };
       }
     });
 
@@ -157,6 +157,7 @@ export class DownloadManager {
       type: options?.audioOnly ? 'audio' : 'video',
       status: 'queued',
       progress: 0,
+      format: options?.formatId,
       createdAt: Date.now(),
     };
 
@@ -452,6 +453,13 @@ export class DownloadManager {
 
 function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function getUserFacingYtDlpError(err: unknown): string {
+  return getErrorMessage(err)
+    .replace(/^yt-dlp exited with code \d+:\s*/i, '')
+    .replace(/^ERROR:\s*/i, '')
+    .trim();
 }
 
 function getErrorCode(err: unknown): unknown {

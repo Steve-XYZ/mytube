@@ -8,6 +8,10 @@ interface FormatSelectorProps {
   onDownload: (url: string, options: { formatId?: string; audioOnly?: boolean; title?: string }) => void;
 }
 
+interface MediaInfoError {
+  error: string;
+}
+
 export function FormatSelector({ url, onClose, onDownload }: FormatSelectorProps) {
   const [info, setInfo] = useState<VideoInfo | null>(null);
   const [formats, setFormats] = useState<VideoFormat[]>([]);
@@ -31,7 +35,12 @@ export function FormatSelector({ url, onClose, onDownload }: FormatSelectorProps
         if (cancelled) return;
 
         if (!videoInfo) {
-          setError('Could not fetch video information. This URL may not be supported.');
+          setError('Could not fetch video information.');
+          return;
+        }
+
+        if (typeof videoInfo === 'object' && 'error' in videoInfo) {
+          setError((videoInfo as MediaInfoError).error || 'Could not fetch video information.');
           return;
         }
 
