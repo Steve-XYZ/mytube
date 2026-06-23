@@ -49,17 +49,30 @@ interface YtDlpJson {
   formats?: YtDlpRawFormat[];
 }
 
+interface YtDlpExecutionProfile {
+  name: string;
+  youtubeClient?: 'mweb';
+  usePotProvider?: boolean;
+  useYouTubeCookies?: boolean;
+}
+
+const DEFAULT_BROWSER_USER_AGENT = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${
+  process.versions.chrome || '120.0.0.0'
+} Safari/537.36`;
+
 export class YtDlpController {
   private ytdlpPath: string;
   private ffmpegPath: string;
   private activeProcesses: Map<string, ChildProcess> = new Map();
   private binariesAvailable: boolean = false;
   private nodeRuntimePath: string | null = null;
+  private potProviderServerHome: string | null = null;
 
   constructor() {
     this.ytdlpPath = this.resolveBinaryPath('yt-dlp');
     this.ffmpegPath = this.resolveBinaryDir();
     this.nodeRuntimePath = this.resolveNodeRuntimePath();
+    this.potProviderServerHome = this.resolvePotProviderServerHome();
 
     // Verify binaries exist at startup
     this.binariesAvailable = fs.existsSync(this.ytdlpPath);
@@ -74,6 +87,9 @@ export class YtDlpController {
     log.info(`ffmpeg dir: ${this.ffmpegPath}`);
     if (this.nodeRuntimePath) {
       log.info(`yt-dlp JS runtime: ${this.nodeRuntimePath}`);
+    }
+    if (this.potProviderServerHome) {
+      log.info(`yt-dlp YouTube PO token provider: ${this.potProviderServerHome}`);
     }
   }
 
@@ -119,6 +135,26 @@ export class YtDlpController {
     return null;
   }
 
+  private resolvePotProviderServerHome(): string | null {
+    const binDir = this.resolveBinaryDir();
+    const serverHome = path.join(binDir, 'bgutil-ytdlp-pot-provider', 'server');
+    const generateScript = path.join(serverHome, 'build', 'generate_once.js');
+    const pluginScript = path.join(
+      binDir,
+      'yt-dlp-plugins',
+      'bgutil-ytdlp-pot-provider',
+      'yt_dlp_plugins',
+      'extractor',
+      'getpot_bgutil_script.py',
+    );
+
+    if (fs.existsSync(generateScript) && fs.existsSync(pluginScript)) {
+      return serverHome;
+    }
+
+    return null;
+  }
+
   /** Validate that a URL is safe to pass to yt-dlp */
   static validateUrl(url: string): boolean {
     try {
@@ -148,7 +184,25 @@ export class YtDlpController {
       throw new Error('yt-dlp binary not found. Please reinstall the application.');
     }
 
-    const output = await this.execYtDlp(['--dump-json', '--no-playlist', '--no-warnings', url], url);
+    let output = '';
+    let lastError: unknown;
+
+    for (const profile of this.getExtractionProfiles(url)) {
+      try {
+        output = await this.execYtDlp(['--dump-json', '--no-playlist', '--no-warnings', url], url, profile);
+        break;
+      } catch (err: unknown) {
+        lastError = err;
+        if (!this.shouldTryNextProfile(url, err, profile)) {
+          break;
+        }
+        log.warn(`yt-dlp extraction profile "${profile.name}" failed; trying fallback profile`);
+      }
+    }
+
+    if (!output) {
+      throw new Error(this.getUserFacingExtractionError(lastError, url));
+    }
 
     const data = JSON.parse(output) as YtDlpJson;
 
@@ -226,10 +280,11 @@ export class YtDlpController {
     // Add URL
     args.push(url);
 
+    const profile = this.getDownloadProfile(url, options);
     let fullArgs: string[];
     let cleanup: () => void;
     try {
-      ({ args: fullArgs, cleanup } = await this.withCommonArgs(args, url));
+      ({ args: fullArgs, cleanup } = await this.withCommonArgs(args, url, profile));
     } catch (err: unknown) {
       onError(err instanceof Error ? err.message : String(err));
       return;
@@ -324,9 +379,9 @@ export class YtDlpController {
     this.activeProcesses.clear();
   }
 
-  private async execYtDlp(args: string[], sourceUrl?: string): Promise<string> {
+  private async execYtDlp(args: string[], sourceUrl?: string, profile?: YtDlpExecutionProfile): Promise<string> {
     return new Promise((resolve, reject) => {
-      this.withCommonArgs(args, sourceUrl)
+      this.withCommonArgs(args, sourceUrl, profile)
         .then(({ args: fullArgs, cleanup }) => {
           const proc = spawn(this.ytdlpPath, fullArgs, {
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -380,15 +435,39 @@ export class YtDlpController {
     });
   }
 
-  private async withCommonArgs(args: string[], sourceUrl?: string): Promise<{ args: string[]; cleanup: () => void }> {
+  private async withCommonArgs(
+    args: string[],
+    sourceUrl?: string,
+    profile: YtDlpExecutionProfile = { name: 'default' },
+  ): Promise<{ args: string[]; cleanup: () => void }> {
     const commonArgs = ['--ffmpeg-location', this.ffmpegPath];
     const cleanupCallbacks: Array<() => void> = [];
+    const isYouTube = sourceUrl ? this.isYouTubeUrl(sourceUrl) : false;
 
     if (this.nodeRuntimePath) {
       commonArgs.push('--js-runtimes', `node:${this.nodeRuntimePath}`);
     }
 
-    if (sourceUrl) {
+    if (isYouTube) {
+      commonArgs.push(
+        '--add-headers',
+        `User-Agent:${DEFAULT_BROWSER_USER_AGENT}`,
+        '--add-headers',
+        'Accept-Language:en-US,en;q=0.9',
+        '--add-headers',
+        'Referer:https://www.youtube.com/',
+      );
+
+      if (profile.youtubeClient) {
+        commonArgs.push('--extractor-args', `youtube:player_client=${profile.youtubeClient}`);
+      }
+
+      if (profile.usePotProvider && this.potProviderServerHome) {
+        commonArgs.push('--extractor-args', `youtubepot-bgutilscript:server_home=${this.potProviderServerHome}`);
+      }
+    }
+
+    if (sourceUrl && (!isYouTube || profile.useYouTubeCookies)) {
       const cookieFilePath = await this.writeCookieFile(sourceUrl);
       if (cookieFilePath) {
         commonArgs.push('--cookies', cookieFilePath);
@@ -406,6 +485,86 @@ export class YtDlpController {
     };
   }
 
+  private getExtractionProfiles(sourceUrl: string): YtDlpExecutionProfile[] {
+    if (!this.isYouTubeUrl(sourceUrl)) {
+      return [{ name: 'default' }];
+    }
+
+    const profiles: YtDlpExecutionProfile[] = [
+      {
+        name: 'youtube-public',
+        useYouTubeCookies: false,
+      },
+    ];
+
+    if (this.potProviderServerHome) {
+      profiles.push({
+        name: 'youtube-mweb-pot',
+        youtubeClient: 'mweb',
+        usePotProvider: true,
+        useYouTubeCookies: false,
+      });
+    }
+
+    return profiles;
+  }
+
+  private getDownloadProfile(sourceUrl: string, options: DownloadOptions): YtDlpExecutionProfile {
+    if (!this.isYouTubeUrl(sourceUrl) || options.formatId || !this.potProviderServerHome) {
+      return {
+        name: this.isYouTubeUrl(sourceUrl) ? 'youtube-public' : 'default',
+        useYouTubeCookies: false,
+      };
+    }
+
+    return {
+      name: 'youtube-mweb-pot',
+      youtubeClient: 'mweb',
+      usePotProvider: true,
+      useYouTubeCookies: false,
+    };
+  }
+
+  private shouldTryNextProfile(sourceUrl: string, err: unknown, profile: YtDlpExecutionProfile): boolean {
+    if (!this.isYouTubeUrl(sourceUrl) || !this.potProviderServerHome || profile.usePotProvider) {
+      return false;
+    }
+
+    return this.isYouTubeTokenOrBotError(this.getErrorMessage(err));
+  }
+
+  private getUserFacingExtractionError(err: unknown, sourceUrl: string): string {
+    const message = this.getErrorMessage(err);
+    if (this.isYouTubeUrl(sourceUrl) && this.isYouTubeTokenOrBotError(message)) {
+      return [
+        'YouTube blocked anonymous extraction for this network/session.',
+        'MyTube avoids Google login inside Electron because Google marks embedded browsers as untrusted.',
+        this.potProviderServerHome
+          ? 'The PO-token fallback was available but YouTube still rejected this video.'
+          : 'Run pnpm run setup to install the local YouTube PO-token provider, then retry.',
+      ].join(' ');
+    }
+
+    return message;
+  }
+
+  private isYouTubeTokenOrBotError(message: string): boolean {
+    return /sign in to confirm|not a bot|po token|http error 403|login_required/i.test(message);
+  }
+
+  private getErrorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
+  }
+
+  private isYouTubeUrl(sourceUrl: string): boolean {
+    try {
+      const host = new URL(sourceUrl).hostname.replace(/^www\./, '');
+      return host === 'youtube.com' || host === 'youtu.be' || host === 'm.youtube.com';
+    } catch {
+      return false;
+    }
+  }
+
   private async writeCookieFile(sourceUrl: string): Promise<string | null> {
     try {
       const cookies = await session.defaultSession.cookies.get({ url: sourceUrl });
@@ -420,7 +579,10 @@ export class YtDlpController {
       fs.writeFileSync(filePath, `${lines.join('\n')}\n`, { mode: 0o600 });
       return filePath;
     } catch (err: unknown) {
-      log.warn('Could not export Electron session cookies for yt-dlp:', err instanceof Error ? err.message : String(err));
+      log.warn(
+        'Could not export Electron session cookies for yt-dlp:',
+        err instanceof Error ? err.message : String(err),
+      );
       return null;
     }
   }

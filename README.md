@@ -19,7 +19,7 @@ Working areas:
 Known gaps:
 
 - Electron needs its postinstall script to run successfully after install.
-- `bin/` is generated locally and must be populated with `yt-dlp`, `ffmpeg`, and `ffprobe` before media download flows work.
+- `bin/` is generated locally and must be populated with `yt-dlp`, `ffmpeg`, `ffprobe`, and the optional YouTube PO-token provider before the broadest media download coverage works.
 - Packaging/signing/notarization has not been fully verified.
 - There is no CI workflow yet.
 - Test code still uses a few casts around mocked Electron and Node APIs.
@@ -113,8 +113,11 @@ The repository guidance mentions `electron-store` and SQLite as target architect
 - `yt-dlp`
 - `ffmpeg`
 - `ffprobe`
+- `bgutil-ytdlp-pot-provider` for YouTube PO-token support
 
 The packaged app expects these files through `electron-builder.yml` `extraResources`.
+
+YouTube currently enforces Proof-of-Origin tokens for some clients and traffic patterns. MyTube does not rely on Google login inside the Electron browser because Google can mark embedded browsers as untrusted. Instead, the main process calls `yt-dlp` in public mode first, skips exporting YouTube cookies by default, and uses the local PO-token provider when `pnpm run setup` has installed it.
 
 ## Release Readiness Checklist
 
