@@ -91,7 +91,11 @@ export class DownloadManager {
         return null;
       }
       try {
-        return await this.ytdlp.getVideoInfo(url);
+        const info = await this.ytdlp.getVideoInfo(url);
+        return {
+          ...info,
+          formats: this.ytdlp.simplifyVideoFormats(info.formats),
+        };
       } catch (err: unknown) {
         log.error('Failed to get media info:', getErrorMessage(err));
         return { error: getUserFacingYtDlpError(err) };
@@ -103,7 +107,8 @@ export class DownloadManager {
         return [];
       }
       try {
-        return await this.ytdlp.getSimplifiedFormats(url);
+        const info = await this.ytdlp.getVideoInfo(url);
+        return this.ytdlp.simplifyVideoFormats(info.formats);
       } catch (err: unknown) {
         log.error('Failed to get formats:', getErrorMessage(err));
         return [];

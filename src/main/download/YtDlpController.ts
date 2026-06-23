@@ -59,8 +59,14 @@ interface YtDlpExecutionProfile {
 const DEFAULT_BROWSER_USER_AGENT = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${
   process.versions.chrome || '120.0.0.0'
 } Safari/537.36`;
+const VIDEO_INFO_CACHE_TTL_MS = 5 * 60 * 1000;
+const METADATA_MAX_RUNTIME_MS = 10 * 60 * 1000;
+const METADATA_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 
 export class YtDlpController {
+  private static videoInfoCache: Map<string, { info: VideoInfo; expiresAt: number }> = new Map();
+  private static videoInfoRequests: Map<string, Promise<VideoInfo>> = new Map();
+
   private ytdlpPath: string;
   private ffmpegPath: string;
   private activeProcesses: Map<string, ChildProcess> = new Map();
@@ -184,6 +190,35 @@ export class YtDlpController {
       throw new Error('yt-dlp binary not found. Please reinstall the application.');
     }
 
+    const cacheKey = this.getInfoCacheKey(url);
+    const cached = YtDlpController.videoInfoCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.info;
+    }
+
+    const inFlight = YtDlpController.videoInfoRequests.get(cacheKey);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const request = this.fetchVideoInfo(url).then((info) => {
+      YtDlpController.videoInfoCache.set(cacheKey, {
+        info,
+        expiresAt: Date.now() + VIDEO_INFO_CACHE_TTL_MS,
+      });
+      return info;
+    });
+
+    YtDlpController.videoInfoRequests.set(cacheKey, request);
+
+    try {
+      return await request;
+    } finally {
+      YtDlpController.videoInfoRequests.delete(cacheKey);
+    }
+  }
+
+  private async fetchVideoInfo(url: string): Promise<VideoInfo> {
     let output = '';
     let lastError: unknown;
 
@@ -237,6 +272,10 @@ export class YtDlpController {
   async getSimplifiedFormats(url: string): Promise<VideoFormat[]> {
     const info = await this.getVideoInfo(url);
     return this.simplifyFormats(info.formats);
+  }
+
+  simplifyVideoFormats(formats: VideoFormat[]): VideoFormat[] {
+    return this.simplifyFormats(formats);
   }
 
   async download(
@@ -391,25 +430,39 @@ export class YtDlpController {
           let stderr = '';
           let settled = false;
 
-          const timeout = setTimeout(() => {
+          let idleTimer: ReturnType<typeof setTimeout> | null = null;
+          const maxRuntimeTimer = setTimeout(() => {
             proc.kill('SIGTERM');
-            finish(() => reject(new Error('yt-dlp timed out')));
-          }, 30000);
+            finish(() => reject(new Error('yt-dlp metadata extraction timed out after 10 minutes')));
+          }, METADATA_MAX_RUNTIME_MS);
 
           const finish = (fn: () => void) => {
             if (settled) return;
             settled = true;
-            clearTimeout(timeout);
+            clearTimeout(maxRuntimeTimer);
+            if (idleTimer) clearTimeout(idleTimer);
             cleanup();
             fn();
           };
 
+          const resetIdleTimer = () => {
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => {
+              proc.kill('SIGTERM');
+              finish(() => reject(new Error('yt-dlp metadata extraction stalled with no output for 2 minutes')));
+            }, METADATA_IDLE_TIMEOUT_MS);
+          };
+
+          resetIdleTimer();
+
           proc.stdout?.on('data', (data: Buffer) => {
             stdout += data.toString();
+            resetIdleTimer();
           });
 
           proc.stderr?.on('data', (data: Buffer) => {
             stderr += data.toString();
+            resetIdleTimer();
           });
 
           proc.on('close', (code) => {
@@ -440,7 +493,20 @@ export class YtDlpController {
     sourceUrl?: string,
     profile: YtDlpExecutionProfile = { name: 'default' },
   ): Promise<{ args: string[]; cleanup: () => void }> {
-    const commonArgs = ['--ffmpeg-location', this.ffmpegPath];
+    const commonArgs = [
+      '--ffmpeg-location',
+      this.ffmpegPath,
+      '--socket-timeout',
+      '30',
+      '--retries',
+      '10',
+      '--fragment-retries',
+      '10',
+      '--retry-sleep',
+      'http:exp=1:20',
+      '--retry-sleep',
+      'fragment:exp=1:20',
+    ];
     const cleanupCallbacks: Array<() => void> = [];
     const isYouTube = sourceUrl ? this.isYouTubeUrl(sourceUrl) : false;
 
@@ -554,6 +620,16 @@ export class YtDlpController {
 
   private getErrorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
+  }
+
+  private getInfoCacheKey(sourceUrl: string): string {
+    try {
+      const parsed = new URL(sourceUrl);
+      parsed.hash = '';
+      return parsed.toString();
+    } catch {
+      return sourceUrl;
+    }
   }
 
   private isYouTubeUrl(sourceUrl: string): boolean {

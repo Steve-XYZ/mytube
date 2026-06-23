@@ -27,10 +27,7 @@ export function FormatSelector({ url, onClose, onDownload }: FormatSelectorProps
         setLoading(true);
         setError(null);
 
-        const [videoInfo, fmts] = await Promise.all([
-          window.electronAPI.getMediaInfo(url),
-          window.electronAPI.getMediaFormats(url),
-        ]);
+        const videoInfo = await window.electronAPI.getMediaInfo(url);
 
         if (cancelled) return;
 
@@ -44,8 +41,9 @@ export function FormatSelector({ url, onClose, onDownload }: FormatSelectorProps
           return;
         }
 
-        setInfo(videoInfo as VideoInfo);
-        setFormats(fmts as VideoFormat[]);
+        const info = videoInfo as VideoInfo;
+        setInfo(info);
+        setFormats(info.formats);
       } catch (err: unknown) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to fetch video info');
