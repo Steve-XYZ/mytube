@@ -1,5 +1,44 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC_CHANNELS } from '../shared/types';
+
+// Keep the preload self-contained. Sandboxed Electron preloads cannot rely on
+// runtime imports from sibling compiled modules.
+const IPC_CHANNELS = {
+  TAB_CREATE: 'tab:create',
+  TAB_CLOSE: 'tab:close',
+  TAB_SWITCH: 'tab:switch',
+  TAB_NAVIGATE: 'tab:navigate',
+  TAB_GO_BACK: 'tab:go-back',
+  TAB_GO_FORWARD: 'tab:go-forward',
+  TAB_RELOAD: 'tab:reload',
+  TAB_STOP: 'tab:stop',
+  TAB_UPDATE: 'tab:update',
+  TAB_LIST: 'tab:list',
+  TAB_ACTIVE_CHANGED: 'tab:active-changed',
+  ZOOM_IN: 'zoom:in',
+  ZOOM_OUT: 'zoom:out',
+  ZOOM_RESET: 'zoom:reset',
+  FIND_IN_PAGE: 'find:in-page',
+  FIND_NEXT: 'find:next',
+  FIND_PREVIOUS: 'find:previous',
+  FIND_STOP: 'find:stop',
+  FIND_RESULT: 'find:result',
+  DOWNLOAD_START: 'download:start',
+  DOWNLOAD_PAUSE: 'download:pause',
+  DOWNLOAD_RESUME: 'download:resume',
+  DOWNLOAD_CANCEL: 'download:cancel',
+  DOWNLOAD_PROGRESS: 'download:progress',
+  DOWNLOAD_COMPLETE: 'download:complete',
+  DOWNLOAD_ERROR: 'download:error',
+  DOWNLOAD_LIST: 'download:list',
+  MEDIA_DETECTED: 'media:detected',
+  MEDIA_GET_INFO: 'media:get-info',
+  MEDIA_GET_FORMATS: 'media:get-formats',
+  SETTINGS_GET: 'settings:get',
+  SETTINGS_SET: 'settings:set',
+  SETTINGS_GET_ALL: 'settings:get-all',
+  APP_GET_VERSION: 'app:get-version',
+  APP_SELECT_DIRECTORY: 'app:select-directory',
+} as const;
 
 const electronAPI = {
   // Tab management

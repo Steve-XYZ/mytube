@@ -88,6 +88,18 @@ export class MainWindow {
       });
     });
 
+    this.appView.webContents.on('console-message', (event) => {
+      if (event.level === 'warning' || event.level === 'error') {
+        console.warn(`[app-shell] ${event.message} (${event.sourceId}:${event.lineNumber})`);
+      }
+    });
+    this.appView.webContents.on('preload-error', (_event, failedPreloadPath, error) => {
+      console.error(`[app-shell] preload failed: ${failedPreloadPath}`, error);
+    });
+    this.appView.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+      console.error(`[app-shell] load failed (${errorCode} ${errorDescription}): ${validatedURL}`);
+    });
+
     // Load the renderer
     this.loadRenderer();
 
