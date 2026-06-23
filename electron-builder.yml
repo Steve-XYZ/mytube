@@ -8,7 +8,7 @@ directories:
 
 files:
   - dist/**/*
-  - "!node_modules/**/*"
+  - package.json
 
 extraResources:
   - from: bin/
