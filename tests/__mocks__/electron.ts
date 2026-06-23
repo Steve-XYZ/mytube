@@ -12,7 +12,6 @@ vi.mock('electron-log/main', () => ({
 
 // Mock electron module
 vi.mock('electron', () => {
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   const ipcHandlers = new Map<string, (...args: unknown[]) => unknown>();
 
   return {
@@ -55,7 +54,7 @@ vi.mock('electron', () => {
         show: vi.fn(),
         on: vi.fn(),
       })),
-      { isSupported: vi.fn(() => true) }
+      { isSupported: vi.fn(() => true) },
     ),
     BaseWindow: vi.fn(),
     WebContentsView: vi.fn(),

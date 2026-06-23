@@ -7,7 +7,13 @@ import { YtDlpController, DownloadOptions, DownloadProgress } from './YtDlpContr
 import type { SettingsManager } from '../settings/SettingsManager';
 import log from 'electron-log/main';
 
-type WebContentsSender = { send: (channel: string, ...args: any[]) => void };
+type WebContentsSender = { send: (channel: string, ...args: unknown[]) => void };
+
+interface StartDownloadOptions {
+  formatId?: string;
+  audioOnly?: boolean;
+  title?: string;
+}
 
 const MAX_DOWNLOAD_HISTORY = 500;
 const PROGRESS_THROTTLE_MS = 500;
@@ -54,7 +60,7 @@ export class DownloadManager {
   }
 
   private setupIpcHandlers(): void {
-    ipcMain.handle(IPC_CHANNELS.DOWNLOAD_START, async (_event, url: string, options?: any) => {
+    ipcMain.handle(IPC_CHANNELS.DOWNLOAD_START, async (_event, url: string, options?: StartDownloadOptions) => {
       if (typeof url !== 'string' || !YtDlpController.validateUrl(url)) {
         throw new Error('Invalid download URL');
       }
@@ -85,10 +91,14 @@ export class DownloadManager {
         return null;
       }
       try {
-        return await this.ytdlp.getVideoInfo(url);
-      } catch (err: any) {
-        log.error('Failed to get media info:', err.message);
-        return null;
+        const info = await this.ytdlp.getVideoInfo(url);
+        return {
+          ...info,
+          formats: this.ytdlp.simplifyVideoFormats(info.formats),
+        };
+      } catch (err: unknown) {
+        log.error('Failed to get media info:', getErrorMessage(err));
+        return { error: getUserFacingYtDlpError(err) };
       }
     });
 
@@ -97,9 +107,10 @@ export class DownloadManager {
         return [];
       }
       try {
-        return await this.ytdlp.getSimplifiedFormats(url);
-      } catch (err: any) {
-        log.error('Failed to get formats:', err.message);
+        const info = await this.ytdlp.getVideoInfo(url);
+        return this.ytdlp.simplifyVideoFormats(info.formats);
+      } catch (err: unknown) {
+        log.error('Failed to get formats:', getErrorMessage(err));
         return [];
       }
     });
@@ -139,11 +150,7 @@ export class DownloadManager {
     });
   }
 
-  async startDownload(url: string, options?: {
-    formatId?: string;
-    audioOnly?: boolean;
-    title?: string;
-  }): Promise<DownloadItem> {
+  async startDownload(url: string, options?: StartDownloadOptions): Promise<DownloadItem> {
     const id = randomUUID();
 
     const item: DownloadItem = {
@@ -155,6 +162,7 @@ export class DownloadManager {
       type: options?.audioOnly ? 'audio' : 'video',
       status: 'queued',
       progress: 0,
+      format: options?.formatId,
       createdAt: Date.now(),
     };
 
@@ -180,13 +188,11 @@ export class DownloadManager {
   }
 
   private processQueue(): void {
-    const activeCount = Array.from(this.downloads.values())
-      .filter((d) => d.status === 'downloading').length;
+    const activeCount = Array.from(this.downloads.values()).filter((d) => d.status === 'downloading').length;
 
     if (activeCount >= this.maxConcurrent) return;
 
-    const nextQueued = Array.from(this.downloads.values())
-      .find((d) => d.status === 'queued');
+    const nextQueued = Array.from(this.downloads.values()).find((d) => d.status === 'queued');
 
     if (!nextQueued) return;
 
@@ -199,8 +205,8 @@ export class DownloadManager {
       if (!fs.existsSync(this.defaultDownloadDir)) {
         fs.mkdirSync(this.defaultDownloadDir, { recursive: true });
       }
-    } catch (err: any) {
-      log.error('Cannot create download directory:', err.message);
+    } catch (err: unknown) {
+      log.error('Cannot create download directory:', getErrorMessage(err));
       item.status = 'failed';
       item.error = 'Download directory is not accessible. Check settings.';
       this.notifyUpdate(item);
@@ -352,8 +358,8 @@ export class DownloadManager {
         .filter((d) => d.status === 'completed' || d.status === 'paused')
         .map((d) => ({ ...d, speed: undefined, eta: undefined }));
       fs.writeFileSync(this.stateFilePath, JSON.stringify(items, null, 2));
-    } catch (err: any) {
-      if (err.code === 'ENOSPC') {
+    } catch (err: unknown) {
+      if (getErrorCode(err) === 'ENOSPC') {
         log.error('Disk full — cannot save download state');
       } else {
         log.error('Failed to save download state:', err);
@@ -376,10 +382,24 @@ export class DownloadManager {
       }
     } catch (err) {
       log.error('Failed to load download state:', err);
+      this.backupCorruptedState();
     }
   }
 
   // ==================== Helpers ====================
+
+  private backupCorruptedState(): void {
+    try {
+      if (fs.existsSync(this.stateFilePath)) {
+        const backupPath = `${this.stateFilePath}.corrupted.${Date.now()}`;
+        fs.copyFileSync(this.stateFilePath, backupPath);
+        fs.writeFileSync(this.stateFilePath, '[]');
+        log.info(`Corrupted download state backed up to: ${backupPath}`);
+      }
+    } catch (err: unknown) {
+      log.error('Failed to backup corrupted download state:', getErrorMessage(err));
+    }
+  }
 
   private notifyUpdate(item: DownloadItem): void {
     this.appViewSender.send(IPC_CHANNELS.DOWNLOAD_PROGRESS, { ...item });
@@ -402,8 +422,9 @@ export class DownloadManager {
 
   private updateDockBadge(): void {
     if (process.platform !== 'darwin') return;
-    const activeCount = Array.from(this.downloads.values())
-      .filter((d) => d.status === 'downloading' || d.status === 'queued').length;
+    const activeCount = Array.from(this.downloads.values()).filter(
+      (d) => d.status === 'downloading' || d.status === 'queued',
+    ).length;
     app.dock?.setBadge(activeCount > 0 ? String(activeCount) : '');
   }
 
@@ -433,4 +454,19 @@ export class DownloadManager {
     ipcMain.removeHandler('download:remove');
     ipcMain.removeHandler('download:clear-completed');
   }
+}
+
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function getUserFacingYtDlpError(err: unknown): string {
+  return getErrorMessage(err)
+    .replace(/^yt-dlp exited with code \d+:\s*/i, '')
+    .replace(/^ERROR:\s*/i, '')
+    .trim();
+}
+
+function getErrorCode(err: unknown): unknown {
+  return typeof err === 'object' && err !== null && 'code' in err ? (err as { code?: unknown }).code : undefined;
 }

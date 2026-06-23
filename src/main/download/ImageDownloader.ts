@@ -2,7 +2,7 @@ import * as https from 'https';
 import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
-import { app } from 'electron';
+import { app, shell } from 'electron';
 import { randomUUID } from 'crypto';
 import log from 'electron-log/main';
 
@@ -28,7 +28,7 @@ export class ImageDownloader {
       savePath?: string;
       referer?: string;
       filename?: string;
-    }
+    },
   ): Promise<ImageDownloadResult> {
     try {
       const filename = this.sanitizeFilename(options?.filename || this.getFilenameFromUrl(url));
@@ -49,9 +49,10 @@ export class ImageDownloader {
 
       log.info(`Image downloaded: ${finalPath}`);
       return { success: true, filePath: finalPath };
-    } catch (err: any) {
-      log.error(`Image download failed: ${url}`, err.message);
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error(`Image download failed: ${url}`, message);
+      return { success: false, error: message };
     }
   }
 
@@ -60,9 +61,7 @@ export class ImageDownloader {
     options?: { referer?: string; subDir?: string },
     onProgress?: (completed: number, total: number) => void,
   ): Promise<ImageDownloadResult[]> {
-    const dir = options?.subDir
-      ? path.join(this.defaultDir, this.sanitizeFilename(options.subDir))
-      : this.defaultDir;
+    const dir = options?.subDir ? path.join(this.defaultDir, this.sanitizeFilename(options.subDir)) : this.defaultDir;
 
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -70,24 +69,36 @@ export class ImageDownloader {
 
     const results: ImageDownloadResult[] = [];
     const total = images.length;
+    let completed = 0;
 
     // Download in batches of 5 to avoid overwhelming the network
     const batchSize = 5;
     for (let i = 0; i < images.length; i += batchSize) {
       const batch = images.slice(i, i + batchSize);
       const batchResults = await Promise.all(
-        batch.map((img) =>
-          this.downloadImage(img.url, {
+        batch.map(async (img) => {
+          const result = await this.downloadImage(img.url, {
             savePath: path.join(dir, img.filename || this.getFilenameFromUrl(img.url)),
             referer: options?.referer,
-          })
-        )
+          });
+          completed++;
+          onProgress?.(completed, total);
+          return result;
+        }),
       );
       results.push(...batchResults);
-      onProgress?.(Math.min(i + batchSize, total), total);
     }
 
     return results;
+  }
+
+  showInFolder(filePath: string): boolean {
+    const resolved = path.resolve(filePath);
+    if (!resolved.startsWith(path.resolve(this.defaultDir)) || !fs.existsSync(resolved)) {
+      return false;
+    }
+    shell.showItemInFolder(resolved);
+    return true;
   }
 
   setDefaultDir(dir: string): void {
@@ -104,7 +115,8 @@ export class ImageDownloader {
   private httpDownload(url: string, destPath: string, referer?: string, redirectCount = 0): Promise<void> {
     return new Promise((resolve, reject) => {
       const headers: Record<string, string> = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
       };
       if (referer) {
         headers['Referer'] = referer;
@@ -113,18 +125,26 @@ export class ImageDownloader {
       const client = url.startsWith('https') ? https : http;
       const request = client.get(url, { headers }, (response) => {
         // Handle redirects (max 5)
-        if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        if (
+          response.statusCode &&
+          response.statusCode >= 300 &&
+          response.statusCode < 400 &&
+          response.headers.location
+        ) {
+          response.resume();
           if (redirectCount >= 5) {
             reject(new Error('Too many redirects'));
             return;
           }
-          this.httpDownload(response.headers.location, destPath, referer, redirectCount + 1)
+          const redirectedUrl = new URL(response.headers.location, url).toString();
+          this.httpDownload(redirectedUrl, destPath, referer, redirectCount + 1)
             .then(resolve)
             .catch(reject);
           return;
         }
 
         if (response.statusCode && response.statusCode !== 200) {
+          response.resume();
           reject(new Error(`HTTP ${response.statusCode}`));
           return;
         }
@@ -135,16 +155,36 @@ export class ImageDownloader {
         }
 
         const file = fs.createWriteStream(destPath);
+        let settled = false;
+
+        const fail = (err: Error) => {
+          if (settled) return;
+          settled = true;
+          file.destroy();
+          fs.unlink(destPath, () => {});
+          reject(err);
+        };
+
         response.pipe(file);
 
+        response.on('error', fail);
+        response.on('aborted', () => fail(new Error('Response aborted')));
+
         file.on('finish', () => {
-          file.close();
-          resolve();
+          if (settled) return;
+          settled = true;
+          file.close((err) => {
+            if (err) {
+              fs.unlink(destPath, () => {});
+              reject(err);
+              return;
+            }
+            resolve();
+          });
         });
 
         file.on('error', (err) => {
-          fs.unlink(destPath, () => {});
-          reject(err);
+          fail(err);
         });
       });
 
@@ -189,11 +229,13 @@ export class ImageDownloader {
   }
 
   private sanitizeFilename(name: string): string {
-    return name
-      // eslint-disable-next-line no-control-regex
-      .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
-      .replace(/\s+/g, '_')
-      .slice(0, 200);
+    return (
+      name
+        // eslint-disable-next-line no-control-regex
+        .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+        .replace(/\s+/g, '_')
+        .slice(0, 200)
+    );
   }
 
   private ensureUniquePath(filePath: string): string {

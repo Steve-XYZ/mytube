@@ -12,7 +12,10 @@ vi.mock('fs', async () => {
       on: vi.fn((event: string, cb: () => void) => {
         if (event === 'finish') setTimeout(cb, 0);
       }),
-      close: vi.fn(),
+      close: vi.fn((cb?: () => void) => {
+        cb?.();
+      }),
+      destroy: vi.fn(),
     })),
     unlink: vi.fn(),
   };
@@ -66,11 +69,13 @@ describe('ImageDownloader', () => {
   describe('sanitizeFilename', () => {
     // Access private method via prototype
     const sanitize = (name: string) => {
-      return name
-        // eslint-disable-next-line no-control-regex
-        .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
-        .replace(/\s+/g, '_')
-        .slice(0, 200);
+      return (
+        name
+          // eslint-disable-next-line no-control-regex
+          .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+          .replace(/\s+/g, '_')
+          .slice(0, 200)
+      );
     };
 
     it('removes dangerous characters', () => {

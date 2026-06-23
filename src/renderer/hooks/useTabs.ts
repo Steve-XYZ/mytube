@@ -11,8 +11,16 @@ export function useTabs() {
     if (refreshing.current) return;
     refreshing.current = true;
     try {
-      const tabList: TabInfo[] = await window.electronAPI.getTabs();
+      const [tabList, currentActiveTabId] = await Promise.all([
+        window.electronAPI.getTabs() as Promise<TabInfo[]>,
+        window.electronAPI.getActiveTabId() as Promise<string | null>,
+      ]);
       setTabs(tabList);
+      setActiveTabId((prev) => {
+        if (currentActiveTabId) return currentActiveTabId;
+        if (prev && tabList.some((tab) => tab.id === prev)) return prev;
+        return tabList[0]?.id ?? null;
+      });
     } finally {
       refreshing.current = false;
     }

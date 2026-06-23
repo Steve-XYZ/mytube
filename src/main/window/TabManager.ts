@@ -30,7 +30,13 @@ export class TabManager {
   private mediaDetectionAbort: Map<string, boolean> = new Map();
   private suspendTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(window: BaseWindow, appView: WebContentsView, preloadPath: string, settingsManager?: SettingsManager, mediaDetector?: MediaDetector) {
+  constructor(
+    window: BaseWindow,
+    appView: WebContentsView,
+    preloadPath: string,
+    settingsManager?: SettingsManager,
+    mediaDetector?: MediaDetector,
+  ) {
     this.window = window;
     this.appView = appView;
     this.preloadPath = preloadPath;
@@ -55,6 +61,7 @@ export class TabManager {
     ipcMain.handle(IPC_CHANNELS.TAB_RELOAD, () => this.reload());
     ipcMain.handle(IPC_CHANNELS.TAB_STOP, () => this.stopLoading());
     ipcMain.handle(IPC_CHANNELS.TAB_LIST, () => this.getTabList());
+    ipcMain.handle(IPC_CHANNELS.TAB_ACTIVE_GET, () => this.getActiveTabId());
 
     // Zoom
     ipcMain.handle(IPC_CHANNELS.ZOOM_IN, () => this.zoomIn());
@@ -63,8 +70,12 @@ export class TabManager {
 
     // Find in page
     ipcMain.handle(IPC_CHANNELS.FIND_IN_PAGE, (_event, text: string) => this.findInPage(text));
-    ipcMain.handle(IPC_CHANNELS.FIND_NEXT, (_event, text: string) => this.findInPage(text, { forward: true, findNext: true }));
-    ipcMain.handle(IPC_CHANNELS.FIND_PREVIOUS, (_event, text: string) => this.findInPage(text, { forward: false, findNext: true }));
+    ipcMain.handle(IPC_CHANNELS.FIND_NEXT, (_event, text: string) =>
+      this.findInPage(text, { forward: true, findNext: true }),
+    );
+    ipcMain.handle(IPC_CHANNELS.FIND_PREVIOUS, (_event, text: string) =>
+      this.findInPage(text, { forward: false, findNext: true }),
+    );
     ipcMain.handle(IPC_CHANNELS.FIND_STOP, () => this.stopFindInPage());
   }
 
@@ -80,8 +91,8 @@ export class TabManager {
       'clipboard-read',
       'clipboard-sanitized-write',
       'fullscreen',
-      'mediaKeySystem',        // DRM (Widevine) — required for YouTube
-      'media',                 // General media playback
+      'mediaKeySystem', // DRM (Widevine) — required for YouTube
+      'media', // General media playback
       'notifications',
       'pointerLock',
     ];
@@ -117,8 +128,8 @@ export class TabManager {
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
-        plugins: true,          // Required for Widevine/Pepper (DRM video playback)
-        webgl: true,            // GPU-accelerated rendering
+        plugins: true, // Required for Widevine/Pepper (DRM video playback)
+        webgl: true, // GPU-accelerated rendering
       },
     });
 
@@ -420,46 +431,60 @@ export class TabManager {
 
       // Link context
       if (params.linkURL) {
-        menu.append(new MenuItem({
-          label: 'Open Link in New Tab',
-          click: () => this.createTab(params.linkURL),
-        }));
-        menu.append(new MenuItem({
-          label: 'Copy Link Address',
-          click: () => clipboard.writeText(params.linkURL),
-        }));
+        menu.append(
+          new MenuItem({
+            label: 'Open Link in New Tab',
+            click: () => this.createTab(params.linkURL),
+          }),
+        );
+        menu.append(
+          new MenuItem({
+            label: 'Copy Link Address',
+            click: () => clipboard.writeText(params.linkURL),
+          }),
+        );
         menu.append(new MenuItem({ type: 'separator' }));
       }
 
       // Image context
       if (params.hasImageContents && params.srcURL) {
-        menu.append(new MenuItem({
-          label: 'Open Image in New Tab',
-          click: () => this.createTab(params.srcURL),
-        }));
-        menu.append(new MenuItem({
-          label: 'Save Image As...',
-          click: () => this.saveImage(params.srcURL),
-        }));
-        menu.append(new MenuItem({
-          label: 'Copy Image Address',
-          click: () => clipboard.writeText(params.srcURL),
-        }));
+        menu.append(
+          new MenuItem({
+            label: 'Open Image in New Tab',
+            click: () => this.createTab(params.srcURL),
+          }),
+        );
+        menu.append(
+          new MenuItem({
+            label: 'Save Image As...',
+            click: () => this.saveImage(params.srcURL),
+          }),
+        );
+        menu.append(
+          new MenuItem({
+            label: 'Copy Image Address',
+            click: () => clipboard.writeText(params.srcURL),
+          }),
+        );
         menu.append(new MenuItem({ type: 'separator' }));
       }
 
       // Text selection
       if (params.selectionText) {
-        menu.append(new MenuItem({
-          label: 'Copy',
-          role: 'copy',
-        }));
-        menu.append(new MenuItem({
-          label: `Search Google for "${params.selectionText.slice(0, 30)}${params.selectionText.length > 30 ? '...' : ''}"`,
-          click: () => {
-            this.createTab(this.buildSearchUrl(params.selectionText));
-          },
-        }));
+        menu.append(
+          new MenuItem({
+            label: 'Copy',
+            role: 'copy',
+          }),
+        );
+        menu.append(
+          new MenuItem({
+            label: `Search Google for "${params.selectionText.slice(0, 30)}${params.selectionText.length > 30 ? '...' : ''}"`,
+            click: () => {
+              this.createTab(this.buildSearchUrl(params.selectionText));
+            },
+          }),
+        );
         menu.append(new MenuItem({ type: 'separator' }));
       }
 
@@ -474,35 +499,43 @@ export class TabManager {
 
       // Navigation
       if (!params.linkURL && !params.hasImageContents && !params.selectionText && !params.isEditable) {
-        menu.append(new MenuItem({
-          label: 'Back',
-          enabled: wc.navigationHistory.canGoBack(),
-          click: () => wc.navigationHistory.goBack(),
-        }));
-        menu.append(new MenuItem({
-          label: 'Forward',
-          enabled: wc.navigationHistory.canGoForward(),
-          click: () => wc.navigationHistory.goForward(),
-        }));
-        menu.append(new MenuItem({
-          label: 'Reload',
-          click: () => wc.reload(),
-        }));
+        menu.append(
+          new MenuItem({
+            label: 'Back',
+            enabled: wc.navigationHistory.canGoBack(),
+            click: () => wc.navigationHistory.goBack(),
+          }),
+        );
+        menu.append(
+          new MenuItem({
+            label: 'Forward',
+            enabled: wc.navigationHistory.canGoForward(),
+            click: () => wc.navigationHistory.goForward(),
+          }),
+        );
+        menu.append(
+          new MenuItem({
+            label: 'Reload',
+            click: () => wc.reload(),
+          }),
+        );
         menu.append(new MenuItem({ type: 'separator' }));
       }
 
       // Always available
-      menu.append(new MenuItem({
-        label: 'Inspect Element',
-        click: () => wc.inspectElement(params.x, params.y),
-      }));
+      menu.append(
+        new MenuItem({
+          label: 'Inspect Element',
+          click: () => wc.inspectElement(params.x, params.y),
+        }),
+      );
 
       menu.popup();
     });
   }
 
   private async saveImage(url: string): Promise<void> {
-    const { canceled, filePath } = await dialog.showSaveDialog(this.window as any, {
+    const { canceled, filePath } = await dialog.showSaveDialog({
       defaultPath: this.getFilenameFromUrl(url),
       filters: [
         { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] },
@@ -630,10 +663,20 @@ export class TabManager {
       }
 
       const videoPlatforms = [
-        'vimeo.com', 'dailymotion.com', 'tiktok.com',
-        'twitter.com', 'x.com', 'instagram.com', 'reddit.com',
-        'facebook.com', 'twitch.tv', 'rumble.com', 'bilibili.com',
-        'odysee.com', 'bandcamp.com', 'soundcloud.com',
+        'vimeo.com',
+        'dailymotion.com',
+        'tiktok.com',
+        'twitter.com',
+        'x.com',
+        'instagram.com',
+        'reddit.com',
+        'facebook.com',
+        'twitch.tv',
+        'rumble.com',
+        'bilibili.com',
+        'odysee.com',
+        'bandcamp.com',
+        'soundcloud.com',
       ];
       return videoPlatforms.some((p) => host.includes(p));
     } catch {
@@ -768,22 +811,38 @@ export class TabManager {
 
   private getFriendlyError(code: number): string {
     switch (code) {
-      case -2: return 'Network Error';
-      case -6: return 'File Not Found';
-      case -7: return 'Too Many Redirects';
-      case -100: return 'Connection Closed';
-      case -101: return 'Connection Reset';
-      case -102: return 'Connection Refused';
-      case -103: return 'Connection Failed';
-      case -104: return 'Connection Timed Out';
-      case -105: return 'Could Not Resolve Host';
-      case -106: return 'No Internet Connection';
-      case -109: return 'Address Unreachable';
-      case -118: return 'Connection Timed Out';
-      case -200: return 'Certificate Error';
-      case -201: return 'Certificate Date Invalid';
-      case -202: return 'Certificate Authority Invalid';
-      default: return 'This Page Could Not Be Loaded';
+      case -2:
+        return 'Network Error';
+      case -6:
+        return 'File Not Found';
+      case -7:
+        return 'Too Many Redirects';
+      case -100:
+        return 'Connection Closed';
+      case -101:
+        return 'Connection Reset';
+      case -102:
+        return 'Connection Refused';
+      case -103:
+        return 'Connection Failed';
+      case -104:
+        return 'Connection Timed Out';
+      case -105:
+        return 'Could Not Resolve Host';
+      case -106:
+        return 'No Internet Connection';
+      case -109:
+        return 'Address Unreachable';
+      case -118:
+        return 'Connection Timed Out';
+      case -200:
+        return 'Certificate Error';
+      case -201:
+        return 'Certificate Date Invalid';
+      case -202:
+        return 'Certificate Authority Invalid';
+      default:
+        return 'This Page Could Not Be Loaded';
     }
   }
 
@@ -842,6 +901,7 @@ export class TabManager {
     ipcMain.removeHandler(IPC_CHANNELS.TAB_RELOAD);
     ipcMain.removeHandler(IPC_CHANNELS.TAB_STOP);
     ipcMain.removeHandler(IPC_CHANNELS.TAB_LIST);
+    ipcMain.removeHandler(IPC_CHANNELS.TAB_ACTIVE_GET);
     ipcMain.removeHandler(IPC_CHANNELS.ZOOM_IN);
     ipcMain.removeHandler(IPC_CHANNELS.ZOOM_OUT);
     ipcMain.removeHandler(IPC_CHANNELS.ZOOM_RESET);

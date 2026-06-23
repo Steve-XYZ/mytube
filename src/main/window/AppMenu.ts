@@ -143,12 +143,7 @@ export class AppMenu {
             accelerator: 'Ctrl+Shift+Tab',
             click: () => this.tabManager.switchToPreviousTab(),
           },
-          ...(isMac
-            ? [
-                { type: 'separator' as const },
-                { role: 'front' as const },
-              ]
-            : []),
+          ...(isMac ? [{ type: 'separator' as const }, { role: 'front' as const }] : []),
         ],
       },
 

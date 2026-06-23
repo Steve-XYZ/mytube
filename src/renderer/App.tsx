@@ -8,7 +8,7 @@ import { ImageGallery } from './components/ImageGallery/ImageGallery';
 import { Settings } from './components/Settings/Settings';
 import { ToastContainer, useToasts } from './components/Toast/Toast';
 import { useTabs } from './hooks/useTabs';
-import type { MediaDetectionState } from '../shared/types';
+import type { DownloadItem, MediaDetectionState } from '../shared/types';
 
 export default function App() {
   const { tabs, activeTabId, activeTab, createTab, closeTab, switchTab, reorderTabs } = useTabs();
@@ -70,28 +70,35 @@ export default function App() {
   }, []);
 
   const mediaState: MediaDetectionState = activeTab?.mediaState || 'none';
+  const activeUrl = activeTab?.url || '';
+  const shellOverlayOpen =
+    findVisible || downloadPanelVisible || Boolean(formatSelectorUrl) || imageGalleryVisible || settingsVisible;
+
+  useEffect(() => {
+    window.electronAPI.setShellOverlayOpen(shellOverlayOpen);
+  }, [shellOverlayOpen]);
 
   // Cmd+D: download media from current page
   useEffect(() => {
     const unsub = window.electronAPI.onDownloadMedia(() => {
-      if (mediaState === 'detected' || mediaState === 'detecting') {
-        if (activeTab?.url) {
-          setFormatSelectorUrl(activeTab.url);
-        }
+      if (activeUrl) {
+        setFormatSelectorUrl(activeUrl);
       }
     });
     return unsub;
-  }, [mediaState, activeTab?.url]);
+  }, [activeUrl]);
 
   // Listen for download errors to show toasts
   useEffect(() => {
-    const unsubError = window.electronAPI.onDownloadError((download: any) => {
-      if (download.error && download.error !== 'Cancelled') {
-        addToast('error', `Download failed: ${download.title || 'Unknown'}`);
+    const unsubError = window.electronAPI.onDownloadError((download: unknown) => {
+      const item = download as DownloadItem;
+      if (item.error && item.error !== 'Cancelled') {
+        addToast('error', `Download failed: ${item.title || 'Unknown'}`);
       }
     });
-    const unsubComplete = window.electronAPI.onDownloadComplete((download: any) => {
-      addToast('success', `Downloaded: ${download.title || download.filename}`);
+    const unsubComplete = window.electronAPI.onDownloadComplete((download: unknown) => {
+      const item = download as DownloadItem;
+      addToast('success', `Downloaded: ${item.title || item.filename}`);
     });
     return () => {
       unsubError();
@@ -100,19 +107,17 @@ export default function App() {
   }, [addToast]);
 
   const handleDownloadClick = useCallback(() => {
-    if (mediaState === 'detected' || mediaState === 'detecting') {
-      setFormatSelectorUrl(activeTab?.url || null);
-    } else {
-      setDownloadPanelVisible((prev) => !prev);
+    if (activeUrl) {
+      setFormatSelectorUrl(activeUrl);
     }
-  }, [mediaState, activeTab?.url]);
+  }, [activeUrl]);
 
   const handleStartDownload = useCallback(
     async (url: string, options: { formatId?: string; audioOnly?: boolean; title?: string }) => {
       await window.electronAPI.startDownload(url, options);
       setDownloadPanelVisible(true);
     },
-    []
+    [],
   );
 
   const handleToggleDownloadPanel = useCallback(() => {
@@ -147,10 +152,7 @@ export default function App() {
         mediaState={mediaState}
       />
       <FindBar visible={findVisible} onClose={() => setFindVisible(false)} />
-      <DownloadPanel
-        visible={downloadPanelVisible}
-        onClose={() => setDownloadPanelVisible(false)}
-      />
+      <DownloadPanel visible={downloadPanelVisible} onClose={() => setDownloadPanelVisible(false)} />
       {formatSelectorUrl && (
         <FormatSelector
           url={formatSelectorUrl}
@@ -164,10 +166,7 @@ export default function App() {
         pageUrl={activeTab?.url || ''}
         onClose={() => setImageGalleryVisible(false)}
       />
-      <Settings
-        visible={settingsVisible}
-        onClose={() => setSettingsVisible(false)}
-      />
+      <Settings visible={settingsVisible} onClose={() => setSettingsVisible(false)} />
       <ToastContainer messages={toasts} onDismiss={dismissToast} />
     </>
   );

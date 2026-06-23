@@ -6,6 +6,10 @@ import log from 'electron-log/main';
 log.initialize();
 log.info('MyTube starting...');
 
+if (process.env.NODE_ENV === 'development' || process.env.VITE_DEV_SERVER_URL) {
+  process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
+}
+
 // Enable DRM (Widevine) support — must be called before app.whenReady()
 app.commandLine.appendSwitch('enable-features', 'WidevineCdm');
 

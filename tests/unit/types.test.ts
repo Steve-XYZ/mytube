@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { IPC_CHANNELS } from '../../src/shared/types';
-import { APP_NAME, DEFAULT_URL, NEW_TAB_URL, TAB_BAR_HEIGHT, NAV_BAR_HEIGHT, HEADER_HEIGHT } from '../../src/shared/constants';
+import {
+  APP_NAME,
+  DEFAULT_URL,
+  NEW_TAB_URL,
+  TAB_BAR_HEIGHT,
+  NAV_BAR_HEIGHT,
+  HEADER_HEIGHT,
+} from '../../src/shared/constants';
 
 describe('IPC_CHANNELS', () => {
   it('has all tab channels defined', () => {
@@ -14,6 +21,7 @@ describe('IPC_CHANNELS', () => {
     expect(IPC_CHANNELS.TAB_STOP).toBe('tab:stop');
     expect(IPC_CHANNELS.TAB_UPDATE).toBe('tab:update');
     expect(IPC_CHANNELS.TAB_LIST).toBe('tab:list');
+    expect(IPC_CHANNELS.TAB_ACTIVE_GET).toBe('tab:active-get');
     expect(IPC_CHANNELS.TAB_ACTIVE_CHANGED).toBe('tab:active-changed');
   });
 
@@ -38,6 +46,7 @@ describe('IPC_CHANNELS', () => {
     expect(IPC_CHANNELS.SETTINGS_GET).toBe('settings:get');
     expect(IPC_CHANNELS.SETTINGS_SET).toBe('settings:set');
     expect(IPC_CHANNELS.SETTINGS_GET_ALL).toBe('settings:get-all');
+    expect(IPC_CHANNELS.APP_SHELL_OVERLAY_SET).toBe('app:shell-overlay-set');
   });
 
   it('has zoom channels defined', () => {

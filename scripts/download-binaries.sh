@@ -4,6 +4,8 @@ set -e
 
 BIN_DIR="$(cd "$(dirname "$0")/.." && pwd)/bin"
 mkdir -p "$BIN_DIR"
+trap 'rm -f "$BIN_DIR"/*.tmp' EXIT
+CURL_ARGS=(--location --fail --http1.1 --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 --progress-bar)
 
 OS=$(uname -s)
 ARCH=$(uname -m)
@@ -30,7 +32,10 @@ fi
 if [ -f "$YTDLP_BIN" ]; then
   echo "    yt-dlp already exists, skipping. Delete $YTDLP_BIN to re-download."
 else
-  curl -L --progress-bar -o "$YTDLP_BIN" "$YTDLP_URL"
+  TMP_YTDLP="${YTDLP_BIN}.tmp"
+  rm -f "$TMP_YTDLP"
+  curl "${CURL_ARGS[@]}" -o "$TMP_YTDLP" "$YTDLP_URL"
+  mv "$TMP_YTDLP" "$YTDLP_BIN"
   chmod +x "$YTDLP_BIN"
   echo "    yt-dlp downloaded: $YTDLP_BIN"
 fi
@@ -66,9 +71,11 @@ if [ "$OS" = "Darwin" ]; then
       echo "    Copied system ffmpeg from $SYSTEM_FFMPEG"
     else
       echo "    Downloading ffmpeg from osxexperts.net..."
-      curl -L --progress-bar -o "$BIN_DIR/ffmpeg.zip" "$FFMPEG_URL"
+      curl "${CURL_ARGS[@]}" -o "$BIN_DIR/ffmpeg.zip.tmp" "$FFMPEG_URL"
+      mv "$BIN_DIR/ffmpeg.zip.tmp" "$BIN_DIR/ffmpeg.zip"
       unzip -o "$BIN_DIR/ffmpeg.zip" -d "$BIN_DIR" && rm "$BIN_DIR/ffmpeg.zip"
-      curl -L --progress-bar -o "$BIN_DIR/ffprobe.zip" "$FFPROBE_URL"
+      curl "${CURL_ARGS[@]}" -o "$BIN_DIR/ffprobe.zip.tmp" "$FFPROBE_URL"
+      mv "$BIN_DIR/ffprobe.zip.tmp" "$BIN_DIR/ffprobe.zip"
       unzip -o "$BIN_DIR/ffprobe.zip" -d "$BIN_DIR" && rm "$BIN_DIR/ffprobe.zip"
       chmod +x "$FFMPEG_BIN" "$FFPROBE_BIN"
       echo "    ffmpeg downloaded"
@@ -96,7 +103,8 @@ else
   else
     FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
     echo "    Downloading ffmpeg for Windows..."
-    curl -L --progress-bar -o "$BIN_DIR/ffmpeg-win.zip" "$FFMPEG_URL"
+    curl "${CURL_ARGS[@]}" -o "$BIN_DIR/ffmpeg-win.zip.tmp" "$FFMPEG_URL"
+    mv "$BIN_DIR/ffmpeg-win.zip.tmp" "$BIN_DIR/ffmpeg-win.zip"
     unzip -o "$BIN_DIR/ffmpeg-win.zip" "*/bin/ffmpeg.exe" "*/bin/ffprobe.exe" -d "$BIN_DIR"
     mv "$BIN_DIR"/ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe "$FFMPEG_BIN"
     mv "$BIN_DIR"/ffmpeg-master-latest-win64-gpl/bin/ffprobe.exe "$FFPROBE_BIN"

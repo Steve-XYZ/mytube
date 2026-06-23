@@ -8,6 +8,10 @@ interface FormatSelectorProps {
   onDownload: (url: string, options: { formatId?: string; audioOnly?: boolean; title?: string }) => void;
 }
 
+interface MediaInfoError {
+  error: string;
+}
+
 export function FormatSelector({ url, onClose, onDownload }: FormatSelectorProps) {
   const [info, setInfo] = useState<VideoInfo | null>(null);
   const [formats, setFormats] = useState<VideoFormat[]>([]);
@@ -23,23 +27,26 @@ export function FormatSelector({ url, onClose, onDownload }: FormatSelectorProps
         setLoading(true);
         setError(null);
 
-        const [videoInfo, fmts] = await Promise.all([
-          window.electronAPI.getMediaInfo(url),
-          window.electronAPI.getMediaFormats(url),
-        ]);
+        const videoInfo = await window.electronAPI.getMediaInfo(url);
 
         if (cancelled) return;
 
         if (!videoInfo) {
-          setError('Could not fetch video information. This URL may not be supported.');
+          setError('Could not fetch video information.');
           return;
         }
 
-        setInfo(videoInfo as VideoInfo);
-        setFormats(fmts as VideoFormat[]);
-      } catch (err: any) {
+        if (typeof videoInfo === 'object' && 'error' in videoInfo) {
+          setError((videoInfo as MediaInfoError).error || 'Could not fetch video information.');
+          return;
+        }
+
+        const info = videoInfo as VideoInfo;
+        setInfo(info);
+        setFormats(info.formats);
+      } catch (err: unknown) {
         if (!cancelled) {
-          setError(err.message || 'Failed to fetch video info');
+          setError(err instanceof Error ? err.message : 'Failed to fetch video info');
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -47,7 +54,9 @@ export function FormatSelector({ url, onClose, onDownload }: FormatSelectorProps
     }
 
     fetchInfo();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [url]);
 
   const handleDownload = () => {
@@ -76,7 +85,9 @@ export function FormatSelector({ url, onClose, onDownload }: FormatSelectorProps
       <div className="format-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="format-header">
           <h3>Download Video</h3>
-          <button className="format-close-btn" onClick={onClose}>&times;</button>
+          <button className="format-close-btn" onClick={onClose}>
+            &times;
+          </button>
         </div>
 
         {loading && (
@@ -89,16 +100,16 @@ export function FormatSelector({ url, onClose, onDownload }: FormatSelectorProps
         {error && (
           <div className="format-error">
             <p>{error}</p>
-            <button className="format-btn format-btn-secondary" onClick={onClose}>Close</button>
+            <button className="format-btn format-btn-secondary" onClick={onClose}>
+              Close
+            </button>
           </div>
         )}
 
         {!loading && !error && info && (
           <>
             <div className="format-info">
-              {info.thumbnail && (
-                <img className="format-thumbnail" src={info.thumbnail} alt="" />
-              )}
+              {info.thumbnail && <img className="format-thumbnail" src={info.thumbnail} alt="" />}
               <div className="format-meta">
                 <p className="format-title">{info.title}</p>
                 <p className="format-uploader">
@@ -122,18 +133,20 @@ export function FormatSelector({ url, onClose, onDownload }: FormatSelectorProps
                   <span className="format-option-label">Best Quality (MP4)</span>
                 </label>
 
-                {formats.filter((f) => f.hasVideo).map((f) => (
-                  <label key={f.formatId} className="format-option">
-                    <input
-                      type="radio"
-                      name="format"
-                      value={f.formatId}
-                      checked={selectedFormat === f.formatId}
-                      onChange={() => setSelectedFormat(f.formatId)}
-                    />
-                    <span className="format-option-label">{f.label}</span>
-                  </label>
-                ))}
+                {formats
+                  .filter((f) => f.hasVideo)
+                  .map((f) => (
+                    <label key={f.formatId} className="format-option">
+                      <input
+                        type="radio"
+                        name="format"
+                        value={f.formatId}
+                        checked={selectedFormat === f.formatId}
+                        onChange={() => setSelectedFormat(f.formatId)}
+                      />
+                      <span className="format-option-label">{f.label}</span>
+                    </label>
+                  ))}
 
                 <label className="format-option format-option-audio">
                   <input

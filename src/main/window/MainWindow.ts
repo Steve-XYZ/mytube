@@ -1,4 +1,4 @@
-import { BaseWindow, WebContentsView } from 'electron';
+import { BaseWindow, ipcMain, WebContentsView } from 'electron';
 import * as path from 'path';
 import {
   DEFAULT_WINDOW_WIDTH,
@@ -7,6 +7,7 @@ import {
   MIN_WINDOW_HEIGHT,
   APP_NAME,
 } from '../../shared/constants';
+import { IPC_CHANNELS } from '../../shared/types';
 import { TabManager } from './TabManager';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { DownloadManager } from '../download/DownloadManager';
@@ -24,6 +25,7 @@ export class MainWindow {
   private mediaDetector: MediaDetector;
   private settingsManager: SettingsManager;
   private autoUpdater: AutoUpdater;
+  private shellOverlayOpen = false;
 
   constructor() {
     this.window = new BaseWindow({
@@ -47,6 +49,7 @@ export class MainWindow {
         preload: preloadPath,
       },
     });
+    this.appView.setBackgroundColor('#00000000');
 
     this.window.contentView.addChildView(this.appView);
     this.updateAppViewBounds();
@@ -62,6 +65,10 @@ export class MainWindow {
     // Set up native app menu
     new AppMenu(this.tabManager, this.appView);
 
+    ipcMain.handle(IPC_CHANNELS.APP_SHELL_OVERLAY_SET, (_event, open: boolean) => {
+      this.setShellOverlayOpen(open);
+    });
+
     // Handle window resize
     this.window.on('resize', () => {
       this.updateAppViewBounds();
@@ -70,9 +77,14 @@ export class MainWindow {
 
     // Set CSP headers for the app shell
     this.appView.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+      if (details.webContentsId !== this.appView.webContents.id) {
+        callback({ responseHeaders: details.responseHeaders });
+        return;
+      }
+
       const isDev = process.env.NODE_ENV === 'development' || process.env.VITE_DEV_SERVER_URL;
       const csp = isDev
-        ? "default-src 'self' 'unsafe-inline' 'unsafe-eval'; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:*; style-src 'self' 'unsafe-inline'; img-src 'self' https: http: data:; connect-src 'self' http://localhost:* ws://localhost:*;"
+        ? "default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:*; style-src 'self' 'unsafe-inline'; img-src 'self' https: http: data:; connect-src 'self' http://localhost:* ws://localhost:*;"
         : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self' https:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';";
 
       callback({
@@ -81,6 +93,18 @@ export class MainWindow {
           'Content-Security-Policy': [csp],
         },
       });
+    });
+
+    this.appView.webContents.on('console-message', (event) => {
+      if (event.level === 'warning' || event.level === 'error') {
+        console.warn(`[app-shell] ${event.message} (${event.sourceId}:${event.lineNumber})`);
+      }
+    });
+    this.appView.webContents.on('preload-error', (_event, failedPreloadPath, error) => {
+      console.error(`[app-shell] preload failed: ${failedPreloadPath}`, error);
+    });
+    this.appView.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+      console.error(`[app-shell] load failed (${errorCode} ${errorDescription}): ${validatedURL}`);
     });
 
     // Load the renderer
@@ -120,6 +144,17 @@ export class MainWindow {
     });
   }
 
+  private setShellOverlayOpen(open: boolean): void {
+    if (this.shellOverlayOpen === open) return;
+    this.shellOverlayOpen = open;
+
+    if (open) {
+      this.window.contentView.addChildView(this.appView);
+    } else {
+      this.window.contentView.addChildView(this.appView, 0);
+    }
+  }
+
   getWindow(): BaseWindow {
     return this.window;
   }
@@ -135,6 +170,7 @@ export class MainWindow {
     this.settingsManager.destroy();
     this.autoUpdater.destroy();
     this.tabManager.destroy();
+    ipcMain.removeHandler(IPC_CHANNELS.APP_SHELL_OVERLAY_SET);
     if (!this.window.isDestroyed()) {
       this.window.close();
     }

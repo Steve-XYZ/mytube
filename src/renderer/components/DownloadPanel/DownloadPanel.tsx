@@ -12,8 +12,8 @@ export function DownloadPanel({ visible, onClose }: DownloadPanelProps) {
 
   // Load downloads and listen for updates
   useEffect(() => {
-    window.electronAPI.getDownloads().then((list: any) => {
-      setDownloads(list as DownloadItem[]);
+    window.electronAPI.getDownloads().then((list: unknown) => {
+      setDownloads(Array.isArray(list) ? (list as DownloadItem[]) : []);
     });
 
     const unsubProgress = window.electronAPI.onDownloadProgress((d: unknown) => {
@@ -91,7 +91,9 @@ export function DownloadPanel({ visible, onClose }: DownloadPanelProps) {
               Clear
             </button>
           )}
-          <button className="dp-close-btn" onClick={onClose}>&times;</button>
+          <button className="dp-close-btn" onClick={onClose}>
+            &times;
+          </button>
         </div>
       </div>
 
@@ -106,37 +108,29 @@ export function DownloadPanel({ visible, onClose }: DownloadPanelProps) {
         {downloads.map((item) => (
           <div key={item.id} className={`dp-item dp-item-${item.status}`}>
             <div className="dp-item-info">
-              {item.thumbnail && (
-                <img className="dp-item-thumb" src={item.thumbnail} alt="" />
-              )}
+              {item.thumbnail && <img className="dp-item-thumb" src={item.thumbnail} alt="" />}
               <div className="dp-item-meta">
-                <p className="dp-item-title" title={item.title}>{item.title}</p>
+                <p className="dp-item-title" title={item.title}>
+                  {item.title}
+                </p>
                 <p className="dp-item-status">
                   {item.status === 'downloading' && (
                     <>
-                      {Math.round(item.progress)}%
-                      {item.speed && ` · ${item.speed}`}
+                      {Math.round(item.progress)}%{item.speed && ` · ${item.speed}`}
                       {item.eta && ` · ETA ${item.eta}`}
                     </>
                   )}
                   {item.status === 'queued' && 'Waiting...'}
                   {item.status === 'paused' && `Paused · ${Math.round(item.progress)}%`}
-                  {item.status === 'completed' && (
-                    <span className="dp-status-completed">Completed</span>
-                  )}
-                  {item.status === 'failed' && (
-                    <span className="dp-status-failed">{item.error || 'Failed'}</span>
-                  )}
+                  {item.status === 'completed' && <span className="dp-status-completed">Completed</span>}
+                  {item.status === 'failed' && <span className="dp-status-failed">{item.error || 'Failed'}</span>}
                 </p>
               </div>
             </div>
 
             {item.status === 'downloading' && (
               <div className="dp-progress-bar">
-                <div
-                  className="dp-progress-fill"
-                  style={{ width: `${Math.min(item.progress, 100)}%` }}
-                />
+                <div className="dp-progress-fill" style={{ width: `${Math.min(item.progress, 100)}%` }} />
               </div>
             )}
 

@@ -46,7 +46,9 @@ function ToastItem({ message, onDismiss }: { message: ToastMessage; onDismiss: (
         {message.type === 'info' && 'i'}
       </span>
       <span className="toast-text">{message.text}</span>
-      <button className="toast-close" onClick={handleDismiss}>&times;</button>
+      <button className="toast-close" onClick={handleDismiss}>
+        &times;
+      </button>
     </div>
   );
 }

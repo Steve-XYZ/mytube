@@ -60,9 +60,7 @@ export function TabBar({ tabs, activeTabId, onSwitchTab, onCloseTab, onNewTab, o
             onDragEnd={handleDragEnd}
             onDragLeave={handleDragLeave}
           >
-            {tab.favicon && (
-              <img className="tab-favicon" src={tab.favicon} alt="" width={16} height={16} />
-            )}
+            {tab.favicon && <img className="tab-favicon" src={tab.favicon} alt="" width={16} height={16} />}
             <span className="tab-title">{tab.title || 'New Tab'}</span>
             {tab.isLoading && <span className="tab-loading" />}
             <button

@@ -12,7 +12,7 @@ export interface DetectedImage {
   naturalHeight: number;
 }
 
-type WebContentsSender = { send: (channel: string, ...args: any[]) => void };
+type WebContentsSender = { send: (channel: string, ...args: unknown[]) => void };
 
 export class MediaDetector {
   private imageDownloader: ImageDownloader;
@@ -45,19 +45,23 @@ export class MediaDetector {
     });
 
     // Download multiple images
-    ipcMain.handle('media:download-images-batch', async (
-      _event,
-      images: Array<{ url: string; filename?: string }>,
-      options?: { referer?: string; subDir?: string }
-    ) => {
-      const results = await this.imageDownloader.downloadBatch(
-        images,
-        options,
-        (completed, total) => {
+    ipcMain.handle(
+      'media:download-images-batch',
+      async (
+        _event,
+        images: Array<{ url: string; filename?: string }>,
+        options?: { referer?: string; subDir?: string },
+      ) => {
+        const results = await this.imageDownloader.downloadBatch(images, options, (completed, total) => {
           this.appViewSender.send('media:batch-progress', { completed, total });
-        }
-      );
-      return results;
+        });
+        return results;
+      },
+    );
+
+    ipcMain.handle('media:show-image-in-folder', (_event, filePath: string) => {
+      if (typeof filePath !== 'string') return false;
+      return this.imageDownloader.showInFolder(filePath);
     });
   }
 
@@ -166,8 +170,8 @@ export class MediaDetector {
 
       log.info(`Scanned page: found ${filtered.length} images (${images.length} total)`);
       return filtered;
-    } catch (err: any) {
-      log.error('Failed to scan page images:', err.message);
+    } catch (err: unknown) {
+      log.error('Failed to scan page images:', err instanceof Error ? err.message : String(err));
       return [];
     }
   }
@@ -180,6 +184,7 @@ export class MediaDetector {
     ipcMain.removeHandler('media:scan-images');
     ipcMain.removeHandler('media:download-image');
     ipcMain.removeHandler('media:download-images-batch');
+    ipcMain.removeHandler('media:show-image-in-folder');
     this.allowedWebContentsIds.clear();
   }
 }

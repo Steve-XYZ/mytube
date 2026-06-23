@@ -38,7 +38,7 @@ export function NewTabPage({ onNavigate }: NewTabPageProps) {
         onNavigate(searchQuery.trim());
       }
     },
-    [searchQuery, onNavigate]
+    [searchQuery, onNavigate],
   );
 
   return (
@@ -66,12 +66,7 @@ export function NewTabPage({ onNavigate }: NewTabPageProps) {
 
         <div className="ntp-quick-links">
           {QUICK_LINKS.map((link) => (
-            <button
-              key={link.url}
-              className="ntp-link"
-              onClick={() => onNavigate(link.url)}
-              title={link.name}
-            >
+            <button key={link.url} className="ntp-link" onClick={() => onNavigate(link.url)} title={link.name}>
               <div className="ntp-link-icon" style={{ backgroundColor: link.color }}>
                 {link.icon}
               </div>
