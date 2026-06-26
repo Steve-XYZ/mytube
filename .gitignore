@@ -1,4 +1,5 @@
 node_modules/
+.pnpm-store/
 dist/
 release/
 bin/
@@ -8,5 +9,4 @@ bin/
 Thumbs.db
 .env
 .env.local
-build/icon_source.png
 build/icon.iconset/

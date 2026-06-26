@@ -106,25 +106,45 @@ export class YtDlpController {
 
   private resolveBinaryPath(name: string): string {
     const ext = process.platform === 'win32' ? '.exe' : '';
-    const binaryName = `${name}${ext}`;
-
-    // In production: binaries are in resources/bin/
-    if (app.isPackaged) {
-      return path.join(process.resourcesPath, 'bin', binaryName);
-    }
-
-    // In development: binaries are in project root bin/
-    return path.join(app.getAppPath(), 'bin', binaryName);
+    return path.join(this.resolveBinaryDir(), `${name}${ext}`);
   }
 
   private resolveBinaryDir(): string {
+    // In production every platform/arch binary is flattened into resources/bin/.
     if (app.isPackaged) {
       return path.join(process.resourcesPath, 'bin');
     }
-    return path.join(app.getAppPath(), 'bin');
+
+    // In development binaries are staged per platform/arch (bin/<os>/<arch>/) so
+    // a single checkout can build every target. Resolve the host's folder.
+    return path.join(app.getAppPath(), 'bin', this.getPlatformDir());
+  }
+
+  /**
+   * Platform-independent resources (the PO-token provider server and yt-dlp
+   * plugins) live in resources/bin/ when packaged and under bin/shared/ in dev.
+   */
+  private resolveSharedResourceDir(): string {
+    if (app.isPackaged) {
+      return path.join(process.resourcesPath, 'bin');
+    }
+    return path.join(app.getAppPath(), 'bin', 'shared');
+  }
+
+  private getPlatformDir(): string {
+    const os = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'win' : 'linux';
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+    return path.join(os, arch);
   }
 
   private resolveNodeRuntimePath(): string | null {
+    if (app.isPackaged) {
+      // Electron can run as its bundled Node.js runtime when this environment
+      // variable is set. This keeps the packaged PO-token provider independent
+      // from a system-wide Node.js installation.
+      return process.execPath;
+    }
+
     const pathDirs = (process.env.PATH || '').split(path.delimiter);
     const executable = process.platform === 'win32' ? 'node.exe' : 'node';
 
@@ -141,8 +161,19 @@ export class YtDlpController {
     return null;
   }
 
+  private getYtDlpEnvironment(): NodeJS.ProcessEnv {
+    if (!app.isPackaged) {
+      return process.env;
+    }
+
+    return {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+    };
+  }
+
   private resolvePotProviderServerHome(): string | null {
-    const binDir = this.resolveBinaryDir();
+    const binDir = this.resolveSharedResourceDir();
     const serverHome = path.join(binDir, 'bgutil-ytdlp-pot-provider', 'server');
     const generateScript = path.join(serverHome, 'build', 'generate_once.js');
     const pluginScript = path.join(
@@ -295,9 +326,39 @@ export class YtDlpController {
       return;
     }
 
+    const baseArgs = this.buildDownloadArgs(url, options);
+    const profiles = this.getDownloadProfiles(url, options);
+
+    let lastError = 'Download failed';
+    for (let i = 0; i < profiles.length; i++) {
+      const profile = profiles[i];
+      const isLastProfile = i === profiles.length - 1;
+      const outcome = await this.attemptDownload(downloadId, baseArgs, url, profile, onProgress);
+
+      if (outcome.status === 'completed') {
+        onComplete(outcome.filename);
+        return;
+      }
+      if (outcome.status === 'cancelled') {
+        onError('Download cancelled');
+        return;
+      }
+
+      lastError = outcome.error;
+      if (!isLastProfile && this.shouldRetryDownloadWithNextProfile(url, outcome.error, profile)) {
+        log.warn(`Download ${downloadId} profile "${profile.name}" failed; retrying with fallback profile`);
+        continue;
+      }
+      break;
+    }
+
+    onError(lastError);
+  }
+
+  /** Build the format/output arguments shared by every download attempt. */
+  private buildDownloadArgs(url: string, options: DownloadOptions): string[] {
     const args: string[] = ['--newline', '--no-playlist', '--no-warnings'];
 
-    // Format selection
     if (options.audioOnly) {
       args.push('-x', '--audio-format', 'mp3', '--audio-quality', '0');
     } else if (options.formatId) {
@@ -308,98 +369,114 @@ export class YtDlpController {
       args.push('--merge-output-format', 'mp4');
     }
 
-    // Output template
     const template = options.outputTemplate || '%(title)s [%(id)s].%(ext)s';
-    const outputPath = path.join(options.outputDir, template);
-    args.push('-o', outputPath);
-
-    // Continue partial downloads
+    args.push('-o', path.join(options.outputDir, template));
     args.push('--continue');
-
-    // Add URL
     args.push(url);
+    return args;
+  }
 
-    const profile = this.getDownloadProfile(url, options);
-    let fullArgs: string[];
-    let cleanup: () => void;
-    try {
-      ({ args: fullArgs, cleanup } = await this.withCommonArgs(args, url, profile));
-    } catch (err: unknown) {
-      onError(err instanceof Error ? err.message : String(err));
-      return;
-    }
+  /** Run a single download attempt with one extraction profile. */
+  private attemptDownload(
+    downloadId: string,
+    baseArgs: string[],
+    url: string,
+    profile: YtDlpExecutionProfile,
+    onProgress: ProgressCallback,
+  ): Promise<{ status: 'completed' | 'cancelled' | 'error'; filename: string; error: string }> {
+    return new Promise((resolve) => {
+      this.withCommonArgs(baseArgs, url, profile)
+        .then(({ args: fullArgs, cleanup }) => {
+          log.info(`Starting download ${downloadId} [${profile.name}]: yt-dlp ${fullArgs.join(' ')}`);
 
-    log.info(`Starting download ${downloadId}: yt-dlp ${fullArgs.join(' ')}`);
+          const proc = spawn(this.ytdlpPath, fullArgs, {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: this.getYtDlpEnvironment(),
+          });
 
-    const proc = spawn(this.ytdlpPath, fullArgs, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+          this.activeProcesses.set(downloadId, proc);
+          let lastFilename = '';
+          let stderrTail = '';
 
-    this.activeProcesses.set(downloadId, proc);
-    let lastFilename = '';
+          proc.stdout?.on('data', (data: Buffer) => {
+            const lines = data.toString().split('\n');
+            for (const line of lines) {
+              const progress = this.parseProgressLine(line);
+              if (progress) {
+                if (progress.filename) lastFilename = progress.filename;
+                onProgress(progress);
+              }
 
-    proc.stdout?.on('data', (data: Buffer) => {
-      const lines = data.toString().split('\n');
-      for (const line of lines) {
-        const progress = this.parseProgressLine(line);
-        if (progress) {
-          if (progress.filename) lastFilename = progress.filename;
-          onProgress(progress);
-        }
+              // Detect destination/merge lines
+              const destMatch = line.match(/\[(?:download|Merger)\].*?Destination:\s*(.+)/);
+              if (destMatch) {
+                lastFilename = destMatch[1].trim();
+              }
 
-        // Detect destination/merge lines
-        const destMatch = line.match(/\[(?:download|Merger)\].*?Destination:\s*(.+)/);
-        if (destMatch) {
-          lastFilename = destMatch[1].trim();
-        }
+              const mergeMatch = line.match(/\[Merger\]\s*Merging formats into "(.+?)"/);
+              if (mergeMatch) {
+                lastFilename = mergeMatch[1].trim();
+              }
 
-        const mergeMatch = line.match(/\[Merger\]\s*Merging formats into "(.+?)"/);
-        if (mergeMatch) {
-          lastFilename = mergeMatch[1].trim();
-        }
+              // Already downloaded
+              const alreadyMatch = line.match(/\[download\]\s*(.+?)\s*has already been downloaded/);
+              if (alreadyMatch) {
+                lastFilename = alreadyMatch[1].trim();
+              }
+            }
+          });
 
-        // Already downloaded
-        const alreadyMatch = line.match(/\[download\]\s*(.+?)\s*has already been downloaded/);
-        if (alreadyMatch) {
-          lastFilename = alreadyMatch[1].trim();
-        }
-      }
-    });
+          proc.stderr?.on('data', (data: Buffer) => {
+            const msg = data.toString().trim();
+            if (msg) {
+              stderrTail = `${stderrTail}\n${msg}`.slice(-2000);
+              if (!msg.startsWith('WARNING')) {
+                log.warn(`yt-dlp stderr [${downloadId}]: ${msg}`);
+              }
+            }
+          });
 
-    proc.stderr?.on('data', (data: Buffer) => {
-      const msg = data.toString().trim();
-      if (msg && !msg.startsWith('WARNING')) {
-        log.warn(`yt-dlp stderr [${downloadId}]: ${msg}`);
-      }
-    });
+          proc.on('close', (code) => {
+            this.activeProcesses.delete(downloadId);
+            cleanup();
 
-    proc.on('close', (code) => {
-      this.activeProcesses.delete(downloadId);
-      cleanup();
+            if (code === 0) {
+              log.info(`Download ${downloadId} completed: ${lastFilename}`);
+              resolve({ status: 'completed', filename: lastFilename, error: '' });
+            } else if (code === null) {
+              // Process was killed (cancelled)
+              log.info(`Download ${downloadId} cancelled`);
+              resolve({ status: 'cancelled', filename: lastFilename, error: 'Download cancelled' });
+            } else {
+              log.error(`Download ${downloadId} [${profile.name}] failed with code ${code}`);
+              const detail = this.getUserFacingExtractionError(new Error(stderrTail.trim()), url);
+              resolve({
+                status: 'error',
+                filename: lastFilename,
+                error: detail || `Download failed (exit code ${code})`,
+              });
+            }
+          });
 
-      if (code === 0) {
-        log.info(`Download ${downloadId} completed: ${lastFilename}`);
-        onComplete(lastFilename);
-      } else if (code === null) {
-        // Process was killed (cancelled)
-        log.info(`Download ${downloadId} cancelled`);
-        onError('Download cancelled');
-      } else {
-        log.error(`Download ${downloadId} failed with code ${code}`);
-        onError(`Download failed (exit code ${code})`);
-      }
-    });
-
-    proc.on('error', (err: NodeJS.ErrnoException) => {
-      this.activeProcesses.delete(downloadId);
-      cleanup();
-      log.error(`Download ${downloadId} process error:`, err);
-      if (err.code === 'ENOENT') {
-        this.binariesAvailable = false;
-        onError('yt-dlp binary not found. Please reinstall the application.');
-      } else {
-        onError(`Failed to start download: ${err.message}`);
-      }
+          proc.on('error', (err: NodeJS.ErrnoException) => {
+            this.activeProcesses.delete(downloadId);
+            cleanup();
+            log.error(`Download ${downloadId} process error:`, err);
+            if (err.code === 'ENOENT') {
+              this.binariesAvailable = false;
+              resolve({
+                status: 'error',
+                filename: lastFilename,
+                error: 'yt-dlp binary not found. Please reinstall the application.',
+              });
+            } else {
+              resolve({ status: 'error', filename: lastFilename, error: `Failed to start download: ${err.message}` });
+            }
+          });
+        })
+        .catch((err: unknown) => {
+          resolve({ status: 'error', filename: '', error: err instanceof Error ? err.message : String(err) });
+        });
     });
   }
 
@@ -424,6 +501,7 @@ export class YtDlpController {
         .then(({ args: fullArgs, cleanup }) => {
           const proc = spawn(this.ytdlpPath, fullArgs, {
             stdio: ['ignore', 'pipe', 'pipe'],
+            env: this.getYtDlpEnvironment(),
           });
 
           let stdout = '';
@@ -529,6 +607,10 @@ export class YtDlpController {
       }
 
       if (profile.usePotProvider && this.potProviderServerHome) {
+        // Point yt-dlp at the bundled bgutil plugin explicitly. Auto-discovery only
+        // searches next to the yt-dlp executable, which doesn't hold in the dev
+        // layout (binary in bin/<os>/<arch>/, plugin in bin/shared/).
+        commonArgs.push('--plugin-dirs', path.join(this.resolveSharedResourceDir(), 'yt-dlp-plugins'));
         commonArgs.push('--extractor-args', `youtubepot-bgutilscript:server_home=${this.potProviderServerHome}`);
       }
     }
@@ -575,20 +657,52 @@ export class YtDlpController {
     return profiles;
   }
 
-  private getDownloadProfile(sourceUrl: string, options: DownloadOptions): YtDlpExecutionProfile {
-    if (!this.isYouTubeUrl(sourceUrl) || options.formatId || !this.potProviderServerHome) {
-      return {
-        name: this.isYouTubeUrl(sourceUrl) ? 'youtube-public' : 'default',
-        useYouTubeCookies: false,
-      };
+  /**
+   * Ordered profiles to try for a download. For a "best" YouTube download the
+   * mweb+PO-token profile (full DASH formats, up to 4K) is tried first and the
+   * public profile is kept as a fallback so the download degrades gracefully
+   * (e.g. to 360p) instead of hard-failing if the preferred profile yields no
+   * formats. A specific formatId came from the public extraction, so it uses the
+   * public profile directly.
+   */
+  private getDownloadProfiles(sourceUrl: string, options: DownloadOptions): YtDlpExecutionProfile[] {
+    if (!this.isYouTubeUrl(sourceUrl)) {
+      return [{ name: 'default' }];
     }
 
-    return {
-      name: 'youtube-mweb-pot',
-      youtubeClient: 'mweb',
-      usePotProvider: true,
-      useYouTubeCookies: false,
-    };
+    const profiles: YtDlpExecutionProfile[] = [];
+    if (!options.formatId && this.potProviderServerHome) {
+      profiles.push({
+        name: 'youtube-mweb-pot',
+        youtubeClient: 'mweb',
+        usePotProvider: true,
+        useYouTubeCookies: false,
+      });
+    }
+    profiles.push({ name: 'youtube-public', useYouTubeCookies: false });
+    return profiles;
+  }
+
+  private shouldRetryDownloadWithNextProfile(
+    sourceUrl: string,
+    error: string,
+    profile: YtDlpExecutionProfile,
+  ): boolean {
+    // Only worth falling back from the mweb/PO-token profile; the public profile
+    // is already the most permissive option.
+    if (!this.isYouTubeUrl(sourceUrl) || !profile.usePotProvider) {
+      return false;
+    }
+    return this.isRecoverableYouTubeDownloadError(error);
+  }
+
+  private isRecoverableYouTubeDownloadError(message: string): boolean {
+    return (
+      this.isYouTubeTokenOrBotError(message) ||
+      /requested format is not available|only images are available|no video formats|unable to extract|nsig|n challenge/i.test(
+        message,
+      )
+    );
   }
 
   private shouldTryNextProfile(sourceUrl: string, err: unknown, profile: YtDlpExecutionProfile): boolean {

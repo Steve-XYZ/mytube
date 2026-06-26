@@ -8,13 +8,15 @@ directories:
 
 files:
   - dist/**/*
-  - "!node_modules/**/*"
+  - package.json
 
-extraResources:
-  - from: bin/
-    to: bin/
-    filter:
-      - "**/*"
+# Binaries are staged per platform/arch in bin/<os>/<arch>/ so a single build host
+# can produce correct packages for every target. extraResources is defined per
+# platform below (electron-builder replaces, not merges, arrays for a platform).
+# The PO-token provider lives in bin/shared/ (platform-independent) and is copied
+# alongside the per-arch binaries. afterPack verifies the result and fails the
+# build if a required binary is missing or has the wrong architecture.
+afterPack: ./scripts/verify-binaries.cjs
 
 asar: true
 compression: maximum
@@ -35,6 +37,25 @@ mac:
   icon: build/icon.icns
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  extraResources:
+    - from: bin/mac/${arch}/
+      to: bin/
+      filter:
+        - yt-dlp
+        - ffmpeg
+        - ffprobe
+    - &shared_resources
+      from: bin/shared/
+      to: bin/
+      filter:
+        - bgutil-ytdlp-pot-provider/server/build/**/*
+        - bgutil-ytdlp-pot-provider/server/package.json
+        - bgutil-ytdlp-pot-provider/server/node_modules/**/*
+        - yt-dlp-plugins/bgutil-ytdlp-pot-provider/yt_dlp_plugins/**/*.py
+        - "!**/.git{,/**/*}"
+        - "!**/.cache{,/**/*}"
+        - "!**/{test,tests,__tests__}{,/**/*}"
+        - "!bgutil-ytdlp-pot-provider/server/build/**/*.map"
 
 dmg:
   sign: false
@@ -58,6 +79,14 @@ win:
       arch:
         - x64
   icon: build/icon.ico
+  extraResources:
+    - from: bin/win/${arch}/
+      to: bin/
+      filter:
+        - yt-dlp.exe
+        - ffmpeg.exe
+        - ffprobe.exe
+    - *shared_resources
 
 nsis:
   oneClick: false
@@ -78,9 +107,23 @@ linux:
         - x64
   category: Network
   icon: build/icons
+  extraResources:
+    - from: bin/linux/${arch}/
+      to: bin/
+      filter:
+        - yt-dlp
+        - ffmpeg
+        - ffprobe
+    - *shared_resources
 
-publish:
-  provider: github
-  owner: ""
-  repo: mytube
-  releaseType: release
+# Auto-update metadata (latest-mac.yml / app-update.yml) is only generated when a
+# valid publish target is set. An empty `owner` made electron-builder crash during
+# update-info generation (computeChannelNames), so publishing is left unconfigured
+# here — `pnpm dist:*` now produces a clean installer. To enable GitHub auto-updates,
+# fill in a real owner and uncomment:
+#
+# publish:
+#   provider: github
+#   owner: your-github-username
+#   repo: mytube
+#   releaseType: release

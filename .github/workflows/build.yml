@@ -1,0 +1,62 @@
+name: Build installers
+
+# Builds the Windows (.exe) and macOS (.dmg) installers natively on hosted
+# runners. Cross-building Windows from macOS is not viable (Wine can't run the
+# 32-bit rcedit under qemu on Apple Silicon), so Windows is built on a real
+# Windows runner here. Each job stages its own native binaries via the project's
+# setup scripts, then the afterPack hook verifies the package before it ships.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win
+          - os: macos-latest
+            target: mac
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.29.3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Builds renderer/main/preload, stages native binaries (yt-dlp + ffmpeg/
+      # ffprobe) and the PO-token provider, then packages with electron-builder.
+      - name: Build installer
+        shell: bash
+        run: pnpm run dist:${{ matrix.target }}
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: mytube-${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip

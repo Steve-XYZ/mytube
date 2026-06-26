@@ -20,7 +20,7 @@ Working areas:
 Known gaps:
 
 - `bin/` is generated locally and ignored by git; `pnpm run setup` must populate it before media download flows work on a fresh checkout.
-- Packaging/signing/notarization has not been fully verified.
+- Notarization and signed release publishing still require project credentials.
 - There is no CI workflow yet.
 - There is no automated E2E coverage yet.
 - YouTube can still reject anonymous guest sessions for some videos/networks before downloadable formats are returned.
@@ -92,6 +92,22 @@ Package locally:
 pnpm run pack
 ```
 
+Run `pnpm run setup` on the same operating system and architecture that will be
+packaged. The media binaries and the PO-token provider include native runtime
+files, so a macOS `bin/` directory must not be reused for a Windows package (or
+vice versa).
+
+Regenerate all platform icons from the canonical root `image.png`:
+
+```bash
+pnpm run icons
+```
+
+Icon generation uses the locked `sharp` development dependency and must run on
+macOS with `iconutil` available. It creates `build/icon.icns`, a multiresolution
+`build/icon.ico`, and transparent Linux PNGs at 16, 32, 48, 64, 128, 256, and
+512 pixels.
+
 ## Architecture Notes
 
 - Main-process code lives in `src/main`.
@@ -121,6 +137,13 @@ The repository guidance mentions `electron-store` and SQLite as target architect
 - `bgutil-ytdlp-pot-provider` for YouTube PO-token support
 
 The packaged app expects these files through `electron-builder.yml` `extraResources`.
+The provider setup compiles from its pinned source revision, then keeps only its
+built server, production dependencies, and yt-dlp plugin in `bin/`. Source,
+tests, Git metadata, and provider development dependencies are not packaged.
+Packaged builds run the provider with Electron's bundled Node.js runtime, so
+end users do not need a separate Node.js installation. The setup script applies
+a narrow compatibility patch to the generated provider entry point so its CLI
+parser treats Electron's Node mode like a normal Node.js process.
 
 YouTube currently enforces Proof-of-Origin tokens for some clients and traffic patterns. MyTube does not rely on Google login inside the Electron browser because Google can mark embedded browsers as untrusted. Instead, the main process calls `yt-dlp` in public mode first, skips exporting YouTube cookies by default, and uses the local PO-token provider when `pnpm run setup` has installed it.
 
@@ -136,7 +159,8 @@ Current media validation evidence:
 - Add CI for test, typecheck, lint, format, and build.
 - Verify `pnpm install` on a clean macOS and Windows machine.
 - Verify `pnpm run setup:bins` on supported platforms.
+- Run `pnpm run icons` after changing `image.png`.
 - Verify `pnpm run dev:electron` starts and basic navigation works.
 - Verify video download and image download flows.
-- Verify packaging through `pnpm run pack`.
-- Define signing and notarization process before public release.
+- Verify macOS and Windows packaging on their native platforms.
+- Configure signing and notarization credentials before public release.
