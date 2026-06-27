@@ -59,7 +59,7 @@ export class MainWindow {
     this.mediaDetector = new MediaDetector(this.appView.webContents);
     this.tabManager = new TabManager(this.window, this.appView, preloadPath, this.settingsManager, this.mediaDetector);
     this.keyboardShortcuts = new KeyboardShortcuts(this.window, this.tabManager, this.appView);
-    this.downloadManager = new DownloadManager(this.appView.webContents, this.settingsManager);
+    this.downloadManager = new DownloadManager(this.appView.webContents, this.settingsManager, this.tabManager);
     this.autoUpdater = new AutoUpdater(this.appView.webContents);
 
     // Set up native app menu

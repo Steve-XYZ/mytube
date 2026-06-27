@@ -86,6 +86,18 @@ export function isLikelyMediaUrl(url: string): boolean {
   return classifyMediaUrl(url).isMediaPage;
 }
 
+export function isDirectMediaResourceUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      ['http:', 'https:'].includes(parsed.protocol) &&
+      DIRECT_MEDIA_EXTENSIONS.test(`${parsed.pathname}${parsed.search}`)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function classifyYouTubeUrl(host: string, pathname: string, parsed: URL): MediaUrlClassification {
   if (host === 'youtu.be') {
     return pathname.length > 1 ? media('youtube') : unsupported('youtube', 'Open a specific YouTube video first.');

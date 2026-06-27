@@ -83,6 +83,8 @@ type ProfileProbe = {
   getDownloadProfiles: (url: string, options: { formatId?: string }) => DownloadProfile[];
   getUserFacingExtractionError: (err: unknown, url: string) => string;
   getRefererForUrl: (url: string) => string | null;
+  getSafeArgsForLog: (args: string[]) => string;
+  isAllowedDownloadHeader: (headerName: string) => boolean;
   ytdlpVersion: string | null;
   shouldRetryDownloadWithNextProfile: (url: string, error: string, profile: DownloadProfile) => boolean;
 };
@@ -185,5 +187,26 @@ describe('YtDlpController user-facing extraction errors', () => {
     expect(profileProbe('/pot').getRefererForUrl('https://www.instagram.com/reel/abc/')).toBe(
       'https://www.instagram.com/',
     );
+  });
+
+  it('redacts signed URLs and cookie files in command logs', () => {
+    const message = profileProbe('/pot').getSafeArgsForLog([
+      '--cookies',
+      '/tmp/yt-dlp-cookies-secret.txt',
+      'Referer:https://example.com/watch?session=secret',
+      'https://cdn.example.com/video.m3u8?token=secret',
+    ]);
+
+    expect(message).toContain('--cookies [cookies-file]');
+    expect(message).toContain('Referer:https://example.com/watch?[redacted]');
+    expect(message).toContain('https://cdn.example.com/video.m3u8?[redacted]');
+    expect(message).not.toContain('secret');
+  });
+
+  it('only allows safe request headers to be replayed through yt-dlp args', () => {
+    const p = profileProbe('/pot');
+    expect(p.isAllowedDownloadHeader('Referer')).toBe(true);
+    expect(p.isAllowedDownloadHeader('Cookie')).toBe(false);
+    expect(p.isAllowedDownloadHeader('Authorization')).toBe(false);
   });
 });

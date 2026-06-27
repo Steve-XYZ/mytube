@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { randomUUID } from 'crypto';
 import { DownloadItem, IPC_CHANNELS } from '../../shared/types';
 import { YtDlpController, DownloadOptions, DownloadProgress } from './YtDlpController';
+import type { CapturedMediaFallback, MediaFallbackProvider } from './MediaFallbackProvider';
 import type { SettingsManager } from '../settings/SettingsManager';
 import log from 'electron-log/main';
 
@@ -26,12 +27,18 @@ export class DownloadManager {
   private defaultDownloadDir: string;
   private stateFilePath: string;
   private settingsManager?: SettingsManager;
+  private mediaFallbackProvider?: MediaFallbackProvider;
   private lastProgressUpdate: Map<string, number> = new Map();
 
-  constructor(appViewSender: WebContentsSender, settingsManager?: SettingsManager) {
+  constructor(
+    appViewSender: WebContentsSender,
+    settingsManager?: SettingsManager,
+    mediaFallbackProvider?: MediaFallbackProvider,
+  ) {
     this.ytdlp = new YtDlpController();
     this.appViewSender = appViewSender;
     this.settingsManager = settingsManager;
+    this.mediaFallbackProvider = mediaFallbackProvider;
 
     this.defaultDownloadDir = settingsManager?.getDownloadDirectory() || path.join(app.getPath('downloads'), 'MyTube');
     if (settingsManager) {
@@ -98,6 +105,10 @@ export class DownloadManager {
         };
       } catch (err: unknown) {
         log.error('Failed to get media info:', getErrorMessage(err));
+        const fallback = this.mediaFallbackProvider?.getMediaFallbackForPage(url);
+        if (fallback) {
+          return this.getFallbackVideoInfo(url, fallback);
+        }
         return { error: getUserFacingYtDlpError(err) };
       }
     });
@@ -199,7 +210,7 @@ export class DownloadManager {
     this.executeDownload(nextQueued);
   }
 
-  private executeDownload(item: DownloadItem): void {
+  private executeDownload(item: DownloadItem, fallback?: CapturedMediaFallback): void {
     // Verify download directory still exists before starting
     try {
       if (!fs.existsSync(this.defaultDownloadDir)) {
@@ -215,18 +226,23 @@ export class DownloadManager {
     }
 
     item.status = 'downloading';
+    item.error = undefined;
     this.notifyUpdate(item);
     this.updateDockBadge();
 
+    const downloadUrl = fallback?.url || item.url;
     const downloadOptions: DownloadOptions = {
       outputDir: this.defaultDownloadDir,
-      formatId: item.format,
+      formatId: fallback ? undefined : item.format,
       audioOnly: item.type === 'audio',
+      httpHeaders: fallback?.requestHeaders,
+      refererUrl: fallback?.pageUrl,
+      cookieSourceUrls: fallback ? [fallback.pageUrl] : undefined,
     };
 
     this.ytdlp.download(
       item.id,
-      item.url,
+      downloadUrl,
       downloadOptions,
       // onProgress — throttled to avoid flooding IPC
       (progress: DownloadProgress) => {
@@ -270,6 +286,22 @@ export class DownloadManager {
           // Already handled by cancel
           return;
         }
+
+        if (!fallback) {
+          const nextFallback = this.mediaFallbackProvider?.getMediaFallbackForPage(item.url);
+          if (nextFallback) {
+            log.info(`Retrying download ${item.id} with captured media fallback`);
+            item.status = 'queued';
+            item.progress = 0;
+            item.speed = undefined;
+            item.eta = undefined;
+            item.totalSize = undefined;
+            this.notifyUpdate(item);
+            this.executeDownload(item, nextFallback);
+            return;
+          }
+        }
+
         item.status = 'failed';
         item.error = error;
         item.speed = undefined;
@@ -435,6 +467,15 @@ export class DownloadManager {
     } catch {
       return url.slice(0, 60);
     }
+  }
+
+  private getFallbackVideoInfo(url: string, fallback: CapturedMediaFallback) {
+    return {
+      id: 'captured-media',
+      title: fallback.title || this.extractTitleFromUrl(url),
+      url,
+      formats: [],
+    };
   }
 
   destroy(): void {

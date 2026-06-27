@@ -3,7 +3,8 @@ import { TabInfo, IPC_CHANNELS, FindInPageResult } from '../../shared/types';
 import { DEFAULT_URL, HEADER_HEIGHT } from '../../shared/constants';
 import type { SettingsManager } from '../settings/SettingsManager';
 import { YtDlpController } from '../download/YtDlpController';
-import { isLikelyMediaUrl } from '../download/MediaUrlClassifier';
+import { isDirectMediaResourceUrl, isLikelyMediaUrl } from '../download/MediaUrlClassifier';
+import type { CapturedMediaFallback, MediaFallbackProvider } from '../download/MediaFallbackProvider';
 import type { MediaDetector } from '../media/MediaDetector';
 import log from 'electron-log/main';
 
@@ -17,10 +18,21 @@ interface ManagedTab {
 
 const TAB_SUSPEND_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_TABS = 20;
+const MAX_CAPTURED_MEDIA_PER_TAB = 20;
+const CAPTURED_MEDIA_TTL_MS = 10 * 60 * 1000;
 
-export class TabManager {
+interface MediaRequestDetails {
+  webContentsId?: number;
+  url: string;
+  resourceType?: string;
+  requestHeaders?: Record<string, string | string[]>;
+}
+
+export class TabManager implements MediaFallbackProvider {
   private tabs: Map<string, ManagedTab> = new Map();
   private activeTabId: string | null = null;
+  private tabIdsByWebContentsId: Map<number, string> = new Map();
+  private capturedMediaByTabId: Map<string, CapturedMediaFallback[]> = new Map();
   private window: BaseWindow;
   private appView: WebContentsView;
   private nextTabId = 1;
@@ -46,6 +58,7 @@ export class TabManager {
     this.ytdlp = new YtDlpController();
     this.setupIpcHandlers();
     this.setupPermissions();
+    this.setupMediaRequestCapture();
     this.startSuspendTimer();
   }
 
@@ -112,6 +125,13 @@ export class TabManager {
     });
   }
 
+  private setupMediaRequestCapture(): void {
+    session.defaultSession.webRequest.onBeforeSendHeaders((details: MediaRequestDetails, callback) => {
+      this.captureMediaRequest(details);
+      callback({ requestHeaders: details.requestHeaders || {} });
+    });
+  }
+
   // ==================== Tab Lifecycle ====================
 
   createTab(url?: string): TabInfo | null {
@@ -149,6 +169,7 @@ export class TabManager {
 
     const managedTab: ManagedTab = { id: tabId, view, info: tabInfo, lastActiveAt: Date.now() };
     this.tabs.set(tabId, managedTab);
+    this.tabIdsByWebContentsId.set(view.webContents.id, tabId);
 
     this.setupTabEvents(managedTab);
     this.setupContextMenu(managedTab);
@@ -167,6 +188,8 @@ export class TabManager {
 
     this.window.contentView.removeChildView(tab.view);
     this.mediaDetector?.unregisterTabWebContents(tab.view.webContents.id);
+    this.tabIdsByWebContentsId.delete(tab.view.webContents.id);
+    this.capturedMediaByTabId.delete(tabId);
     tab.view.webContents.close();
     this.tabs.delete(tabId);
 
@@ -580,6 +603,24 @@ export class TabManager {
     return tab?.view.webContents;
   }
 
+  getMediaFallbackForPage(pageUrl: string): CapturedMediaFallback | null {
+    const normalizedPageUrl = this.normalizeComparableUrl(pageUrl);
+    const now = Date.now();
+
+    for (const tab of this.tabs.values()) {
+      if (this.normalizeComparableUrl(tab.info.url) !== normalizedPageUrl) continue;
+
+      const candidates = (this.capturedMediaByTabId.get(tab.id) || []).filter(
+        (candidate) => now - candidate.capturedAt <= CAPTURED_MEDIA_TTL_MS,
+      );
+      if (!candidates.length) return null;
+
+      return candidates[0];
+    }
+
+    return null;
+  }
+
   getTabCount(): number {
     return this.tabs.size;
   }
@@ -632,6 +673,13 @@ export class TabManager {
 
   private updateNavState(managedTab: ManagedTab, url: string): void {
     const wc = managedTab.view.webContents;
+    const previousComparableUrl = this.normalizeComparableUrl(managedTab.info.url);
+    const nextComparableUrl = this.normalizeComparableUrl(url);
+
+    if (previousComparableUrl !== nextComparableUrl) {
+      this.capturedMediaByTabId.delete(managedTab.id);
+    }
+
     managedTab.info.url = url;
     managedTab.info.canGoBack = wc.navigationHistory.canGoBack();
     managedTab.info.canGoForward = wc.navigationHistory.canGoForward();
@@ -694,13 +742,103 @@ export class TabManager {
       if (!this.tabs.has(tabId)) return;
       if (managedTab.info.url !== url) return;
 
+      const fallback = this.getMediaFallbackForPage(url);
+      if (fallback) {
+        managedTab.info.mediaState = 'detected';
+        managedTab.info.mediaTitle = fallback.title || managedTab.info.title || 'Detected media';
+        this.notifyTabUpdate(managedTab.info);
+        return;
+      }
+
       managedTab.info.mediaState = 'unsupported';
       this.notifyTabUpdate(managedTab.info);
     }
   }
 
+  private captureMediaRequest(details: MediaRequestDetails): void {
+    if (!details.webContentsId || !this.isCapturableMediaRequest(details)) return;
+
+    const tabId = this.tabIdsByWebContentsId.get(details.webContentsId);
+    if (!tabId) return;
+
+    const tab = this.tabs.get(tabId);
+    if (!tab) return;
+
+    const fallback: CapturedMediaFallback = {
+      url: details.url,
+      pageUrl: tab.info.url,
+      title: tab.info.title,
+      requestHeaders: this.pickDownloadHeaders(details.requestHeaders || {}),
+      resourceType: details.resourceType,
+      capturedAt: Date.now(),
+    };
+
+    const existing = this.capturedMediaByTabId.get(tabId) || [];
+    const deduped = existing.filter((candidate) => candidate.url !== fallback.url);
+    this.capturedMediaByTabId.set(tabId, [fallback, ...deduped].slice(0, MAX_CAPTURED_MEDIA_PER_TAB));
+
+    if (tab.info.mediaState !== 'detected') {
+      tab.info.mediaState = 'detected';
+      tab.info.mediaTitle = fallback.title || 'Detected media';
+      this.notifyTabUpdate(tab.info);
+
+      this.appView.webContents.send(IPC_CHANNELS.MEDIA_DETECTED, {
+        tabId,
+        url: tab.info.url,
+        title: tab.info.mediaTitle,
+      });
+    }
+  }
+
+  private isCapturableMediaRequest(details: MediaRequestDetails): boolean {
+    try {
+      const parsed = new URL(details.url);
+      if (!['http:', 'https:'].includes(parsed.protocol)) return false;
+    } catch {
+      return false;
+    }
+
+    if (isDirectMediaResourceUrl(details.url)) return true;
+
+    return details.resourceType === 'media';
+  }
+
+  private pickDownloadHeaders(headers: Record<string, string | string[]>): Record<string, string> {
+    const allowed = new Set(['user-agent', 'referer', 'origin', 'accept', 'accept-language']);
+    const picked: Record<string, string> = {};
+
+    for (const [rawName, rawValue] of Object.entries(headers)) {
+      const normalized = rawName.toLowerCase();
+      if (!allowed.has(normalized)) continue;
+
+      const value = Array.isArray(rawValue) ? rawValue.join(', ') : rawValue;
+      if (value) {
+        picked[this.formatHeaderName(normalized)] = value;
+      }
+    }
+
+    return picked;
+  }
+
+  private formatHeaderName(headerName: string): string {
+    return headerName
+      .split('-')
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join('-');
+  }
+
   private notifyTabUpdate(tabInfo: TabInfo): void {
     this.appView.webContents.send(IPC_CHANNELS.TAB_UPDATE, tabInfo);
+  }
+
+  private normalizeComparableUrl(url: string): string {
+    try {
+      const parsed = new URL(url);
+      parsed.hash = '';
+      return parsed.toString();
+    } catch {
+      return url;
+    }
   }
 
   private isSearchQuery(input: string): boolean {

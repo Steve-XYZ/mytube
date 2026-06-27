@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { classifyMediaUrl, isLikelyMediaUrl } from '../../src/main/download/MediaUrlClassifier';
+import {
+  classifyMediaUrl,
+  isDirectMediaResourceUrl,
+  isLikelyMediaUrl,
+} from '../../src/main/download/MediaUrlClassifier';
 
 /**
  * Tests for pure logic functions from TabManager.
@@ -163,6 +167,8 @@ describe('TabManager - isKnownVideoUrl', () => {
     it('detects direct media URLs', () => {
       expect(isLikelyMediaUrl('https://cdn.example.com/video.mp4?token=abc')).toBe(true);
       expect(isLikelyMediaUrl('https://cdn.example.com/live/playlist.m3u8')).toBe(true);
+      expect(isDirectMediaResourceUrl('https://cdn.example.com/video.mp4?token=abc')).toBe(true);
+      expect(isDirectMediaResourceUrl('https://cdn.example.com/live/playlist.m3u8')).toBe(true);
     });
   });
 
@@ -187,6 +193,7 @@ describe('TabManager - isKnownVideoUrl', () => {
     it('rejects invalid URLs', () => {
       expect(isLikelyMediaUrl('not a url')).toBe(false);
       expect(isLikelyMediaUrl('')).toBe(false);
+      expect(isDirectMediaResourceUrl('ftp://cdn.example.com/video.mp4')).toBe(false);
     });
 
     it('explains Instagram browsing pages as non-media', () => {

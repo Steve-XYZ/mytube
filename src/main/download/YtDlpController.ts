@@ -12,6 +12,9 @@ export interface DownloadOptions {
   outputDir: string;
   outputTemplate?: string;
   audioOnly?: boolean;
+  httpHeaders?: Record<string, string>;
+  refererUrl?: string;
+  cookieSourceUrls?: string[];
 }
 
 export interface DownloadProgress {
@@ -56,6 +59,12 @@ interface YtDlpExecutionProfile {
   usePotProvider?: boolean;
   useYouTubeCookies?: boolean;
   useBrowserHeaders?: boolean;
+}
+
+interface YtDlpRequestContext {
+  httpHeaders?: Record<string, string>;
+  refererUrl?: string;
+  cookieSourceUrls?: string[];
 }
 
 const DEFAULT_BROWSER_USER_AGENT = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${
@@ -364,7 +373,7 @@ export class YtDlpController {
     for (let i = 0; i < profiles.length; i++) {
       const profile = profiles[i];
       const isLastProfile = i === profiles.length - 1;
-      const outcome = await this.attemptDownload(downloadId, baseArgs, url, profile, onProgress);
+      const outcome = await this.attemptDownload(downloadId, baseArgs, url, options, profile, onProgress);
 
       if (outcome.status === 'completed') {
         onComplete(outcome.filename);
@@ -412,13 +421,14 @@ export class YtDlpController {
     downloadId: string,
     baseArgs: string[],
     url: string,
+    options: DownloadOptions,
     profile: YtDlpExecutionProfile,
     onProgress: ProgressCallback,
   ): Promise<{ status: 'completed' | 'cancelled' | 'error'; filename: string; error: string }> {
     return new Promise((resolve) => {
-      this.withCommonArgs(baseArgs, url, profile)
+      this.withCommonArgs(baseArgs, url, profile, options)
         .then(({ args: fullArgs, cleanup }) => {
-          log.info(`Starting download ${downloadId} [${profile.name}]: yt-dlp ${fullArgs.join(' ')}`);
+          log.info(`Starting download ${downloadId} [${profile.name}]: yt-dlp ${this.getSafeArgsForLog(fullArgs)}`);
 
           const proc = spawn(this.ytdlpPath, fullArgs, {
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -601,6 +611,7 @@ export class YtDlpController {
     args: string[],
     sourceUrl?: string,
     profile: YtDlpExecutionProfile = { name: 'default' },
+    requestContext: YtDlpRequestContext = {},
   ): Promise<{ args: string[]; cleanup: () => void }> {
     const commonArgs = [
       '--ffmpeg-location',
@@ -623,18 +634,27 @@ export class YtDlpController {
       commonArgs.push('--js-runtimes', `node:${this.nodeRuntimePath}`);
     }
 
-    if (sourceUrl && (isYouTube || profile.useBrowserHeaders)) {
-      commonArgs.push(
-        '--add-headers',
-        `User-Agent:${DEFAULT_BROWSER_USER_AGENT}`,
-        '--add-headers',
-        'Accept-Language:en-US,en;q=0.9',
-      );
+    const headers = new Map<string, string>();
+    const setHeader = (name: string, value?: string) => {
+      if (!value) return;
+      headers.set(name.toLowerCase(), `${this.formatHeaderName(name)}:${value}`);
+    };
 
-      const referer = this.getRefererForUrl(sourceUrl);
-      if (referer) {
-        commonArgs.push('--add-headers', `Referer:${referer}`);
+    if (sourceUrl && (isYouTube || profile.useBrowserHeaders)) {
+      setHeader('User-Agent', DEFAULT_BROWSER_USER_AGENT);
+      setHeader('Accept-Language', 'en-US,en;q=0.9');
+
+      setHeader('Referer', requestContext.refererUrl || this.getRefererForUrl(sourceUrl) || undefined);
+    }
+
+    for (const [name, value] of Object.entries(requestContext.httpHeaders || {})) {
+      if (this.isAllowedDownloadHeader(name)) {
+        setHeader(name, value);
       }
+    }
+
+    for (const header of headers.values()) {
+      commonArgs.push('--add-headers', header);
     }
 
     if (isYouTube) {
@@ -652,7 +672,7 @@ export class YtDlpController {
     }
 
     if (sourceUrl && (!isYouTube || profile.useYouTubeCookies)) {
-      const cookieFilePath = await this.writeCookieFile(sourceUrl);
+      const cookieFilePath = await this.writeCookieFile([sourceUrl, ...(requestContext.cookieSourceUrls || [])]);
       if (cookieFilePath) {
         commonArgs.push('--cookies', cookieFilePath);
         cleanupCallbacks.push(() => fs.unlink(cookieFilePath, () => {}));
@@ -886,16 +906,74 @@ export class YtDlpController {
     }
   }
 
-  private async writeCookieFile(sourceUrl: string): Promise<string | null> {
+  private isAllowedDownloadHeader(headerName: string): boolean {
+    return ['user-agent', 'referer', 'origin', 'accept', 'accept-language'].includes(headerName.toLowerCase());
+  }
+
+  private formatHeaderName(headerName: string): string {
+    return headerName
+      .toLowerCase()
+      .split('-')
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join('-');
+  }
+
+  private getSafeArgsForLog(args: string[]): string {
+    return args
+      .map((arg, index) => {
+        if (args[index - 1] === '--cookies') {
+          return '[cookies-file]';
+        }
+
+        if (YtDlpController.validateUrl(arg)) {
+          return this.redactUrlForLog(arg);
+        }
+
+        const headerUrlMatch = arg.match(/^([^:]+:)(https?:\/\/.+)$/);
+        if (headerUrlMatch) {
+          return `${headerUrlMatch[1]}${this.redactUrlForLog(headerUrlMatch[2])}`;
+        }
+
+        return arg;
+      })
+      .join(' ');
+  }
+
+  private redactUrlForLog(url: string): string {
     try {
-      const cookies = await session.defaultSession.cookies.get({ url: sourceUrl });
-      if (!cookies.length) return null;
+      const parsed = new URL(url);
+      if (parsed.search) {
+        parsed.search = '?[redacted]';
+      }
+      return parsed.toString();
+    } catch {
+      return url;
+    }
+  }
+
+  private async writeCookieFile(sourceUrls: string | string[]): Promise<string | null> {
+    try {
+      const urls = Array.isArray(sourceUrls) ? sourceUrls : [sourceUrls];
+      const cookieMap = new Map<string, { cookie: Cookie; sourceUrl: string }>();
+
+      for (const sourceUrl of urls) {
+        const cookies = await session.defaultSession.cookies.get({ url: sourceUrl });
+        for (const cookie of cookies) {
+          cookieMap.set(`${cookie.domain || new URL(sourceUrl).hostname}\t${cookie.path || '/'}\t${cookie.name}`, {
+            cookie,
+            sourceUrl,
+          });
+        }
+      }
+
+      const cookieEntries = Array.from(cookieMap.values());
+      if (!cookieEntries.length) return null;
 
       const filePath = path.join(app.getPath('userData'), `yt-dlp-cookies-${randomUUID()}.txt`);
       const lines = [
         '# Netscape HTTP Cookie File',
         '# Generated by MyTube for a local yt-dlp request.',
-        ...cookies.map((cookie) => this.formatCookie(cookie, sourceUrl)),
+        ...cookieEntries.map(({ cookie, sourceUrl }) => this.formatCookie(cookie, sourceUrl)),
       ];
       fs.writeFileSync(filePath, `${lines.join('\n')}\n`, { mode: 0o600 });
       return filePath;
