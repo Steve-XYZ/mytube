@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import type { AppSettings } from '../../../shared/types';
+import type { AppSettings, GoogleAuthStatus } from '../../../shared/types';
 import './Settings.css';
 
 interface SettingsProps {
@@ -7,15 +7,18 @@ interface SettingsProps {
   onClose: () => void;
 }
 
-type Section = 'general' | 'downloads' | 'browser';
+type Section = 'general' | 'downloads' | 'browser' | 'account';
 
 export function Settings({ visible, onClose }: SettingsProps) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [activeSection, setActiveSection] = useState<Section>('general');
+  const [googleStatus, setGoogleStatus] = useState<GoogleAuthStatus | null>(null);
+  const [authBusy, setAuthBusy] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
     window.electronAPI.getAllSettings().then((s: AppSettings) => setSettings(s));
+    window.electronAPI.getGoogleAuthStatus().then((status: GoogleAuthStatus) => setGoogleStatus(status));
   }, [visible]);
 
   const updateSetting = useCallback(async (key: string, value: unknown) => {
@@ -31,6 +34,26 @@ export function Settings({ visible, onClose }: SettingsProps) {
       updateSetting('downloads.defaultDirectory', dir);
     }
   }, [updateSetting]);
+
+  const handleGoogleSignIn = useCallback(async () => {
+    setAuthBusy(true);
+    try {
+      const status = await window.electronAPI.signInWithGoogle();
+      setGoogleStatus(status as GoogleAuthStatus);
+    } finally {
+      setAuthBusy(false);
+    }
+  }, []);
+
+  const handleGoogleSignOut = useCallback(async () => {
+    setAuthBusy(true);
+    try {
+      const status = await window.electronAPI.signOutGoogle();
+      setGoogleStatus(status as GoogleAuthStatus);
+    } finally {
+      setAuthBusy(false);
+    }
+  }, []);
 
   if (!visible) return null;
 
@@ -88,6 +111,21 @@ export function Settings({ visible, onClose }: SettingsProps) {
               </svg>
               Browser
             </button>
+            <button
+              className={`settings-nav-item ${activeSection === 'account' ? 'active' : ''}`}
+              onClick={() => setActiveSection('account')}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="5" r="2.8" stroke="currentColor" strokeWidth="1.4" />
+                <path
+                  d="M3 14c.7-2.5 2.4-3.8 5-3.8s4.3 1.3 5 3.8"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+              Account
+            </button>
           </nav>
 
           <div className="settings-content">
@@ -104,6 +142,14 @@ export function Settings({ visible, onClose }: SettingsProps) {
             {settings && activeSection === 'browser' && (
               <BrowserSettings settings={settings} onUpdate={updateSetting} />
             )}
+            {activeSection === 'account' && (
+              <AccountSettings
+                status={googleStatus}
+                busy={authBusy}
+                onSignIn={handleGoogleSignIn}
+                onSignOut={handleGoogleSignOut}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -112,6 +158,66 @@ export function Settings({ visible, onClose }: SettingsProps) {
 }
 
 // === Section Components ===
+
+function AccountSettings({
+  status,
+  busy,
+  onSignIn,
+  onSignOut,
+}: {
+  status: GoogleAuthStatus | null;
+  busy: boolean;
+  onSignIn: () => void;
+  onSignOut: () => void;
+}) {
+  const signedIn = status?.signedIn === true;
+  const configured = status?.configured === true;
+
+  return (
+    <div className="settings-section">
+      <h3>Account</h3>
+
+      <div className="settings-row settings-row-stack">
+        <div className="settings-account">
+          {signedIn && status?.picture ? (
+            <img className="settings-account-avatar" src={status.picture} alt="" />
+          ) : (
+            <div className="settings-account-avatar settings-account-avatar-placeholder">
+              <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="5" r="2.8" stroke="currentColor" strokeWidth="1.4" />
+                <path
+                  d="M3 14c.7-2.5 2.4-3.8 5-3.8s4.3 1.3 5 3.8"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
+          )}
+
+          <div className="settings-label">
+            <span>{signedIn ? status?.name || status?.email || 'Google account' : 'Google account'}</span>
+            <span className="settings-description settings-description-wrap">
+              {signedIn
+                ? status?.youtubeChannelTitle
+                  ? `YouTube channel: ${status.youtubeChannelTitle}`
+                  : status?.email || 'Connected to Google'
+                : configured
+                  ? 'Connect with the system browser to enable Google and YouTube account access.'
+                  : 'Set MYTUBE_GOOGLE_OAUTH_CLIENT_ID to enable Google sign-in.'}
+            </span>
+          </div>
+        </div>
+
+        <button className="settings-btn" onClick={signedIn ? onSignOut : onSignIn} disabled={busy || !configured}>
+          {busy ? 'Working...' : signedIn ? 'Disconnect' : 'Connect'}
+        </button>
+      </div>
+
+      {status?.error && <div className="settings-auth-error">{status.error}</div>}
+    </div>
+  );
+}
 
 function GeneralSettings({
   settings,

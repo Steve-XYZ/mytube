@@ -37,6 +37,9 @@ const IPC_CHANNELS = {
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
   SETTINGS_GET_ALL: 'settings:get-all',
+  AUTH_GOOGLE_STATUS: 'auth:google-status',
+  AUTH_GOOGLE_SIGN_IN: 'auth:google-sign-in',
+  AUTH_GOOGLE_SIGN_OUT: 'auth:google-sign-out',
   APP_GET_VERSION: 'app:get-version',
   APP_SELECT_DIRECTORY: 'app:select-directory',
   APP_SHELL_OVERLAY_SET: 'app:shell-overlay-set',
@@ -95,6 +98,11 @@ const electronAPI = {
   getSetting: (key: string) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET, key),
   setSetting: (key: string, value: unknown) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET, key, value),
   getAllSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_ALL),
+
+  // Auth
+  getGoogleAuthStatus: () => ipcRenderer.invoke(IPC_CHANNELS.AUTH_GOOGLE_STATUS),
+  signInWithGoogle: () => ipcRenderer.invoke(IPC_CHANNELS.AUTH_GOOGLE_SIGN_IN),
+  signOutGoogle: () => ipcRenderer.invoke(IPC_CHANNELS.AUTH_GOOGLE_SIGN_OUT),
 
   // App
   getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION),

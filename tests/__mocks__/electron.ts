@@ -43,6 +43,7 @@ vi.mock('electron', () => {
       showSaveDialog: vi.fn().mockResolvedValue({ canceled: true }),
     },
     shell: {
+      openExternal: vi.fn().mockResolvedValue(undefined),
       openPath: vi.fn(),
       showItemInFolder: vi.fn(),
     },

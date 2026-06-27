@@ -68,6 +68,23 @@ Production-style local start:
 pnpm run start
 ```
 
+### Google Account Sign-In
+
+Google account connection uses the system browser with native-app OAuth, PKCE,
+and a loopback redirect such as `http://127.0.0.1:<port>/oauth/google/callback`.
+It does not sign the embedded browser tab into google.com or youtube.com.
+
+Create a Google OAuth client for a desktop/native app, enable the YouTube Data
+API if channel lookup is needed, and launch MyTube with:
+
+```bash
+MYTUBE_GOOGLE_OAUTH_CLIENT_ID="your-client-id.apps.googleusercontent.com" pnpm run dev:electron
+```
+
+The connected account status is shown in Settings -> Account. Tokens are stored
+under Electron `userData` in `google-auth.json` with restricted file permissions
+where supported by the OS.
+
 ## Validation
 
 Run the narrow checks first:
