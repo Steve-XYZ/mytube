@@ -1,10 +1,11 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, spawnSync, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { randomUUID } from 'crypto';
 import { app, session, type Cookie } from 'electron';
 import { VideoInfo, VideoFormat } from '../../shared/types';
 import log from 'electron-log/main';
+import { classifyMediaUrl } from './MediaUrlClassifier';
 
 export interface DownloadOptions {
   formatId?: string;
@@ -54,6 +55,7 @@ interface YtDlpExecutionProfile {
   youtubeClient?: 'mweb';
   usePotProvider?: boolean;
   useYouTubeCookies?: boolean;
+  useBrowserHeaders?: boolean;
 }
 
 const DEFAULT_BROWSER_USER_AGENT = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${
@@ -66,6 +68,7 @@ const METADATA_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 export class YtDlpController {
   private static videoInfoCache: Map<string, { info: VideoInfo; expiresAt: number }> = new Map();
   private static videoInfoRequests: Map<string, Promise<VideoInfo>> = new Map();
+  private static ytdlpVersionCache: Map<string, string | null> = new Map();
 
   private ytdlpPath: string;
   private ffmpegPath: string;
@@ -73,6 +76,7 @@ export class YtDlpController {
   private binariesAvailable: boolean = false;
   private nodeRuntimePath: string | null = null;
   private potProviderServerHome: string | null = null;
+  private ytdlpVersion: string | null = null;
 
   constructor() {
     this.ytdlpPath = this.resolveBinaryPath('yt-dlp');
@@ -84,12 +88,17 @@ export class YtDlpController {
     this.binariesAvailable = fs.existsSync(this.ytdlpPath);
     if (!this.binariesAvailable) {
       log.error(`yt-dlp binary not found at: ${this.ytdlpPath}`);
+    } else {
+      this.ytdlpVersion = this.detectYtDlpVersion();
     }
     if (!fs.existsSync(path.join(this.ffmpegPath, `ffmpeg${process.platform === 'win32' ? '.exe' : ''}`))) {
       log.warn(`ffmpeg binary not found in: ${this.ffmpegPath}`);
     }
 
     log.info(`yt-dlp path: ${this.ytdlpPath} (exists: ${this.binariesAvailable})`);
+    if (this.ytdlpVersion) {
+      log.info(`yt-dlp version: ${this.ytdlpVersion}`);
+    }
     log.info(`ffmpeg dir: ${this.ffmpegPath}`);
     if (this.nodeRuntimePath) {
       log.info(`yt-dlp JS runtime: ${this.nodeRuntimePath}`);
@@ -159,6 +168,28 @@ export class YtDlpController {
     }
 
     return null;
+  }
+
+  private detectYtDlpVersion(): string | null {
+    if (YtDlpController.ytdlpVersionCache.has(this.ytdlpPath)) {
+      return YtDlpController.ytdlpVersionCache.get(this.ytdlpPath) || null;
+    }
+
+    const result = spawnSync(this.ytdlpPath, ['--version'], {
+      encoding: 'utf8',
+      timeout: 2000,
+      env: this.getYtDlpEnvironment(),
+    });
+
+    if (result.error || result.status !== 0) {
+      log.warn('Unable to detect yt-dlp version:', result.error?.message || result.stderr?.trim() || result.status);
+      YtDlpController.ytdlpVersionCache.set(this.ytdlpPath, null);
+      return null;
+    }
+
+    const version = result.stdout.trim() || null;
+    YtDlpController.ytdlpVersionCache.set(this.ytdlpPath, version);
+    return version;
   }
 
   private getYtDlpEnvironment(): NodeJS.ProcessEnv {
@@ -592,16 +623,21 @@ export class YtDlpController {
       commonArgs.push('--js-runtimes', `node:${this.nodeRuntimePath}`);
     }
 
-    if (isYouTube) {
+    if (sourceUrl && (isYouTube || profile.useBrowserHeaders)) {
       commonArgs.push(
         '--add-headers',
         `User-Agent:${DEFAULT_BROWSER_USER_AGENT}`,
         '--add-headers',
         'Accept-Language:en-US,en;q=0.9',
-        '--add-headers',
-        'Referer:https://www.youtube.com/',
       );
 
+      const referer = this.getRefererForUrl(sourceUrl);
+      if (referer) {
+        commonArgs.push('--add-headers', `Referer:${referer}`);
+      }
+    }
+
+    if (isYouTube) {
       if (profile.youtubeClient) {
         commonArgs.push('--extractor-args', `youtube:player_client=${profile.youtubeClient}`);
       }
@@ -635,13 +671,14 @@ export class YtDlpController {
 
   private getExtractionProfiles(sourceUrl: string): YtDlpExecutionProfile[] {
     if (!this.isYouTubeUrl(sourceUrl)) {
-      return [{ name: 'default' }];
+      return [{ name: 'browser-context', useBrowserHeaders: true }];
     }
 
     const profiles: YtDlpExecutionProfile[] = [
       {
         name: 'youtube-public',
         useYouTubeCookies: false,
+        useBrowserHeaders: true,
       },
     ];
 
@@ -651,6 +688,7 @@ export class YtDlpController {
         youtubeClient: 'mweb',
         usePotProvider: true,
         useYouTubeCookies: false,
+        useBrowserHeaders: true,
       });
     }
 
@@ -667,7 +705,7 @@ export class YtDlpController {
    */
   private getDownloadProfiles(sourceUrl: string, options: DownloadOptions): YtDlpExecutionProfile[] {
     if (!this.isYouTubeUrl(sourceUrl)) {
-      return [{ name: 'default' }];
+      return [{ name: 'browser-context', useBrowserHeaders: true }];
     }
 
     const profiles: YtDlpExecutionProfile[] = [];
@@ -677,9 +715,10 @@ export class YtDlpController {
         youtubeClient: 'mweb',
         usePotProvider: true,
         useYouTubeCookies: false,
+        useBrowserHeaders: true,
       });
     }
-    profiles.push({ name: 'youtube-public', useYouTubeCookies: false });
+    profiles.push({ name: 'youtube-public', useYouTubeCookies: false, useBrowserHeaders: true });
     return profiles;
   }
 
@@ -715,6 +754,12 @@ export class YtDlpController {
 
   private getUserFacingExtractionError(err: unknown, sourceUrl: string): string {
     const message = this.getErrorMessage(err);
+    const media = classifyMediaUrl(sourceUrl);
+
+    if (!media.isMediaPage) {
+      return media.reason || 'Open a specific video, post, reel, or track before downloading.';
+    }
+
     if (this.isYouTubeUrl(sourceUrl) && this.isYouTubeTokenOrBotError(message)) {
       return [
         'YouTube blocked anonymous extraction for this network/session.',
@@ -725,11 +770,84 @@ export class YtDlpController {
       ].join(' ');
     }
 
-    return message;
+    if (this.isLoginOrCookieError(message)) {
+      return [
+        'This site requires a fresh logged-in browser session.',
+        'Open the site in MyTube, sign in if needed, refresh the media page, and try again.',
+      ].join(' ');
+    }
+
+    if (this.isAntiBotError(message)) {
+      return [
+        'This site blocked the downloader with an anti-bot or rate-limit challenge.',
+        'Open the page in MyTube with the same network, complete any challenge, refresh the page, and retry.',
+      ].join(' ');
+    }
+
+    if (this.isDrmError(message)) {
+      return 'This media appears to be DRM-protected and cannot be downloaded by MyTube.';
+    }
+
+    if (this.isFfmpegError(message)) {
+      return 'The download needs ffmpeg, but ffmpeg failed or is missing. Run pnpm run setup and retry.';
+    }
+
+    if (this.isExtractorDataError(message)) {
+      const versionText = this.ytdlpVersion ? ` Bundled yt-dlp version: ${this.ytdlpVersion}.` : '';
+      return [
+        `${this.getPlatformLabel(sourceUrl)} changed its page format or this URL is not exposed as downloadable media.`,
+        'Refresh yt-dlp with pnpm run setup, then retry with a direct media post URL.',
+        versionText,
+      ]
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    return this.stripYtDlpNoise(message);
   }
 
   private isYouTubeTokenOrBotError(message: string): boolean {
     return /sign in to confirm|not a bot|po token|http error 403|login_required/i.test(message);
+  }
+
+  private isLoginOrCookieError(message: string): boolean {
+    return /login required|login_required|private video|private content|this video is private|sign in|not logged in|cookies/i.test(
+      message,
+    );
+  }
+
+  private isAntiBotError(message: string): boolean {
+    return /captcha|cloudflare|too many requests|http error 429|http error 403|forbidden|blocked|not a bot/i.test(
+      message,
+    );
+  }
+
+  private isDrmError(message: string): boolean {
+    return /drm|widevine|protected content|copyright protected/i.test(message);
+  }
+
+  private isFfmpegError(message: string): boolean {
+    return /ffmpeg|ffprobe|postprocessing|merger/i.test(message);
+  }
+
+  private isExtractorDataError(message: string): boolean {
+    return /unable to extract|please report this issue|unsupported url|no video formats|no media found|does not contain a video|requested format is not available/i.test(
+      message,
+    );
+  }
+
+  private stripYtDlpNoise(message: string): string {
+    return message
+      .replace(/^yt-dlp exited with code \d+:\s*/i, '')
+      .replace(/^ERROR:\s*/i, '')
+      .replace(/\s*please report this issue.*$/i, '')
+      .trim();
+  }
+
+  private getPlatformLabel(sourceUrl: string): string {
+    const platform = classifyMediaUrl(sourceUrl).platform;
+    return platform === 'unknown' ? 'The site' : platform[0].toUpperCase() + platform.slice(1);
   }
 
   private getErrorMessage(err: unknown): string {
@@ -752,6 +870,19 @@ export class YtDlpController {
       return host === 'youtube.com' || host === 'youtu.be' || host === 'm.youtube.com';
     } catch {
       return false;
+    }
+  }
+
+  private getRefererForUrl(sourceUrl: string): string | null {
+    try {
+      const parsed = new URL(sourceUrl);
+      if (this.isYouTubeUrl(sourceUrl)) {
+        return 'https://www.youtube.com/';
+      }
+
+      return `${parsed.protocol}//${parsed.host}/`;
+    } catch {
+      return null;
     }
   }
 

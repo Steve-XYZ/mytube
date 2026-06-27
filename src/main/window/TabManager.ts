@@ -3,6 +3,7 @@ import { TabInfo, IPC_CHANNELS, FindInPageResult } from '../../shared/types';
 import { DEFAULT_URL, HEADER_HEIGHT } from '../../shared/constants';
 import type { SettingsManager } from '../settings/SettingsManager';
 import { YtDlpController } from '../download/YtDlpController';
+import { isLikelyMediaUrl } from '../download/MediaUrlClassifier';
 import type { MediaDetector } from '../media/MediaDetector';
 import log from 'electron-log/main';
 
@@ -654,34 +655,7 @@ export class TabManager {
   }
 
   private isKnownVideoUrl(url: string): boolean {
-    try {
-      const u = new URL(url);
-      const host = u.hostname.replace('www.', '');
-
-      if (host === 'youtube.com' || host === 'youtu.be' || host === 'm.youtube.com') {
-        return u.pathname.includes('/watch') || u.pathname.includes('/shorts/') || host === 'youtu.be';
-      }
-
-      const videoPlatforms = [
-        'vimeo.com',
-        'dailymotion.com',
-        'tiktok.com',
-        'twitter.com',
-        'x.com',
-        'instagram.com',
-        'reddit.com',
-        'facebook.com',
-        'twitch.tv',
-        'rumble.com',
-        'bilibili.com',
-        'odysee.com',
-        'bandcamp.com',
-        'soundcloud.com',
-      ];
-      return videoPlatforms.some((p) => host.includes(p));
-    } catch {
-      return false;
-    }
+    return isLikelyMediaUrl(url);
   }
 
   private async probeMediaAsync(managedTab: ManagedTab): Promise<void> {

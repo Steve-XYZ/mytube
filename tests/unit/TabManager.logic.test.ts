@@ -1,42 +1,11 @@
 import { describe, it, expect } from 'vitest';
+import { classifyMediaUrl, isLikelyMediaUrl } from '../../src/main/download/MediaUrlClassifier';
 
 /**
  * Tests for pure logic functions from TabManager.
  * Since TabManager is heavily coupled to Electron (BaseWindow, WebContentsView, ipcMain),
  * we extract and test the pure logic functions independently.
  */
-
-// ===== isKnownVideoUrl =====
-function isKnownVideoUrl(url: string): boolean {
-  try {
-    const u = new URL(url);
-    const host = u.hostname.replace('www.', '');
-
-    if (host === 'youtube.com' || host === 'youtu.be' || host === 'm.youtube.com') {
-      return u.pathname.includes('/watch') || u.pathname.includes('/shorts/') || host === 'youtu.be';
-    }
-
-    const videoPlatforms = [
-      'vimeo.com',
-      'dailymotion.com',
-      'tiktok.com',
-      'twitter.com',
-      'x.com',
-      'instagram.com',
-      'reddit.com',
-      'facebook.com',
-      'twitch.tv',
-      'rumble.com',
-      'bilibili.com',
-      'odysee.com',
-      'bandcamp.com',
-      'soundcloud.com',
-    ];
-    return videoPlatforms.some((p) => host.includes(p));
-  } catch {
-    return false;
-  }
-}
 
 // ===== isAllowedUrl =====
 function isAllowedUrl(url: string): boolean {
@@ -121,88 +90,110 @@ function getFriendlyError(code: number): string {
 describe('TabManager - isKnownVideoUrl', () => {
   describe('YouTube', () => {
     it('detects youtube.com/watch URLs', () => {
-      expect(isKnownVideoUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBe(true);
+      expect(isLikelyMediaUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBe(true);
     });
 
     it('detects youtube.com/shorts URLs', () => {
-      expect(isKnownVideoUrl('https://www.youtube.com/shorts/abc123')).toBe(true);
+      expect(isLikelyMediaUrl('https://www.youtube.com/shorts/abc123')).toBe(true);
     });
 
     it('detects youtu.be short links', () => {
-      expect(isKnownVideoUrl('https://youtu.be/dQw4w9WgXcQ')).toBe(true);
+      expect(isLikelyMediaUrl('https://youtu.be/dQw4w9WgXcQ')).toBe(true);
     });
 
     it('detects m.youtube.com', () => {
-      expect(isKnownVideoUrl('https://m.youtube.com/watch?v=abc')).toBe(true);
+      expect(isLikelyMediaUrl('https://m.youtube.com/watch?v=abc')).toBe(true);
     });
 
     it('rejects youtube.com homepage', () => {
-      expect(isKnownVideoUrl('https://www.youtube.com/')).toBe(false);
+      expect(isLikelyMediaUrl('https://www.youtube.com/')).toBe(false);
     });
 
     it('rejects youtube.com/channel pages', () => {
-      expect(isKnownVideoUrl('https://www.youtube.com/channel/UC123')).toBe(false);
+      expect(isLikelyMediaUrl('https://www.youtube.com/channel/UC123')).toBe(false);
     });
 
     it('rejects youtube.com/results (search)', () => {
-      expect(isKnownVideoUrl('https://www.youtube.com/results?search_query=test')).toBe(false);
+      expect(isLikelyMediaUrl('https://www.youtube.com/results?search_query=test')).toBe(false);
     });
   });
 
   describe('other platforms', () => {
     it('detects vimeo.com', () => {
-      expect(isKnownVideoUrl('https://vimeo.com/123456')).toBe(true);
+      expect(isLikelyMediaUrl('https://vimeo.com/123456')).toBe(true);
     });
 
     it('detects tiktok.com', () => {
-      expect(isKnownVideoUrl('https://www.tiktok.com/@user/video/123')).toBe(true);
+      expect(isLikelyMediaUrl('https://www.tiktok.com/@user/video/123')).toBe(true);
     });
 
     it('detects twitter.com', () => {
-      expect(isKnownVideoUrl('https://twitter.com/user/status/123')).toBe(true);
+      expect(isLikelyMediaUrl('https://twitter.com/user/status/123')).toBe(true);
     });
 
     it('detects x.com', () => {
-      expect(isKnownVideoUrl('https://x.com/user/status/123')).toBe(true);
+      expect(isLikelyMediaUrl('https://x.com/user/status/123')).toBe(true);
     });
 
-    it('detects instagram.com', () => {
-      expect(isKnownVideoUrl('https://www.instagram.com/p/abc123/')).toBe(true);
+    it('detects instagram post and reel URLs', () => {
+      expect(isLikelyMediaUrl('https://www.instagram.com/p/abc123/')).toBe(true);
+      expect(isLikelyMediaUrl('https://www.instagram.com/reel/abc123/')).toBe(true);
     });
 
     it('detects reddit.com', () => {
-      expect(isKnownVideoUrl('https://www.reddit.com/r/funny/comments/abc/title/')).toBe(true);
+      expect(isLikelyMediaUrl('https://www.reddit.com/r/funny/comments/abc/title/')).toBe(true);
     });
 
     it('detects twitch.tv', () => {
-      expect(isKnownVideoUrl('https://www.twitch.tv/videos/123')).toBe(true);
+      expect(isLikelyMediaUrl('https://www.twitch.tv/videos/123')).toBe(true);
     });
 
     it('detects soundcloud.com', () => {
-      expect(isKnownVideoUrl('https://soundcloud.com/artist/track')).toBe(true);
+      expect(isLikelyMediaUrl('https://soundcloud.com/artist/track')).toBe(true);
     });
 
     it('detects bandcamp.com', () => {
-      expect(isKnownVideoUrl('https://artist.bandcamp.com/track/song')).toBe(true);
+      expect(isLikelyMediaUrl('https://artist.bandcamp.com/track/song')).toBe(true);
     });
 
     it('detects bilibili.com', () => {
-      expect(isKnownVideoUrl('https://www.bilibili.com/video/BV123')).toBe(true);
+      expect(isLikelyMediaUrl('https://www.bilibili.com/video/BV123')).toBe(true);
+    });
+
+    it('detects direct media URLs', () => {
+      expect(isLikelyMediaUrl('https://cdn.example.com/video.mp4?token=abc')).toBe(true);
+      expect(isLikelyMediaUrl('https://cdn.example.com/live/playlist.m3u8')).toBe(true);
     });
   });
 
   describe('non-video URLs', () => {
     it('rejects google.com', () => {
-      expect(isKnownVideoUrl('https://www.google.com')).toBe(false);
+      expect(isLikelyMediaUrl('https://www.google.com')).toBe(false);
     });
 
     it('rejects github.com', () => {
-      expect(isKnownVideoUrl('https://github.com/user/repo')).toBe(false);
+      expect(isLikelyMediaUrl('https://github.com/user/repo')).toBe(false);
+    });
+
+    it('rejects browsing pages on supported platforms', () => {
+      expect(isLikelyMediaUrl('https://www.instagram.com/explore/')).toBe(false);
+      expect(isLikelyMediaUrl('https://www.instagram.com/openai/')).toBe(false);
+      expect(isLikelyMediaUrl('https://www.tiktok.com/@openai')).toBe(false);
+      expect(isLikelyMediaUrl('https://x.com/explore')).toBe(false);
+      expect(isLikelyMediaUrl('https://www.facebook.com/some.profile')).toBe(false);
+      expect(isLikelyMediaUrl('https://evilbandcamp.com/track/song')).toBe(false);
     });
 
     it('rejects invalid URLs', () => {
-      expect(isKnownVideoUrl('not a url')).toBe(false);
-      expect(isKnownVideoUrl('')).toBe(false);
+      expect(isLikelyMediaUrl('not a url')).toBe(false);
+      expect(isLikelyMediaUrl('')).toBe(false);
+    });
+
+    it('explains Instagram browsing pages as non-media', () => {
+      expect(classifyMediaUrl('https://www.instagram.com/explore/')).toMatchObject({
+        platform: 'instagram',
+        isMediaPage: false,
+      });
     });
   });
 });
