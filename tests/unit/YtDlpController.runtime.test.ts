@@ -84,6 +84,7 @@ type ProfileProbe = {
   getUserFacingExtractionError: (err: unknown, url: string) => string;
   getRefererForUrl: (url: string) => string | null;
   getSafeArgsForLog: (args: string[]) => string;
+  redactSensitiveTextForLog: (text: string) => string;
   isAllowedDownloadHeader: (headerName: string) => boolean;
   ytdlpVersion: string | null;
   shouldRetryDownloadWithNextProfile: (url: string, error: string, profile: DownloadProfile) => boolean;
@@ -200,6 +201,16 @@ describe('YtDlpController user-facing extraction errors', () => {
     expect(message).toContain('--cookies [cookies-file]');
     expect(message).toContain('Referer:https://example.com/watch?[redacted]');
     expect(message).toContain('https://cdn.example.com/video.m3u8?[redacted]');
+    expect(message).not.toContain('secret');
+  });
+
+  it('redacts signed URLs and cookie files in yt-dlp stderr text', () => {
+    const message = profileProbe('/pot').redactSensitiveTextForLog(
+      'ERROR: unable to download https://cdn.example.com/video.m3u8?token=secret using /tmp/yt-dlp-cookies-secret.txt',
+    );
+
+    expect(message).toContain('https://cdn.example.com/video.m3u8?[redacted]');
+    expect(message).toContain('[cookies-file]');
     expect(message).not.toContain('secret');
   });
 

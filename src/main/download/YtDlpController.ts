@@ -468,7 +468,7 @@ export class YtDlpController {
           });
 
           proc.stderr?.on('data', (data: Buffer) => {
-            const msg = data.toString().trim();
+            const msg = this.redactSensitiveTextForLog(data.toString().trim());
             if (msg) {
               stderrTail = `${stderrTail}\n${msg}`.slice(-2000);
               if (!msg.startsWith('WARNING')) {
@@ -580,7 +580,7 @@ export class YtDlpController {
           });
 
           proc.stderr?.on('data', (data: Buffer) => {
-            stderr += data.toString();
+            stderr += this.redactSensitiveTextForLog(data.toString());
             resetIdleTimer();
           });
 
@@ -937,6 +937,12 @@ export class YtDlpController {
         return arg;
       })
       .join(' ');
+  }
+
+  private redactSensitiveTextForLog(text: string): string {
+    return text
+      .replace(/https?:\/\/[^\s'"<>]+/g, (url) => this.redactUrlForLog(url))
+      .replace(/[^\s'"<>]*yt-dlp-cookies-[^\s'"<>]+\.txt/g, '[cookies-file]');
   }
 
   private redactUrlForLog(url: string): string {
