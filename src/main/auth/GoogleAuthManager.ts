@@ -1,4 +1,4 @@
-import { app, ipcMain, shell } from 'electron';
+import { app, ipcMain, safeStorage, shell } from 'electron';
 import { createHash, randomBytes } from 'crypto';
 import { createServer } from 'http';
 import * as fs from 'fs/promises';
@@ -28,6 +28,12 @@ type StoredGoogleAuth = {
     picture?: string;
     youtubeChannelTitle?: string;
   };
+};
+
+type StoredGoogleAuthEnvelope = {
+  version: 2;
+  encrypted: true;
+  cipherText: string;
 };
 
 type GoogleUserInfo = {
@@ -298,18 +304,7 @@ export class GoogleAuthManager {
   private async readStoredAuth(): Promise<StoredGoogleAuth | null> {
     try {
       const raw = await fs.readFile(this.authFilePath, 'utf-8');
-      const parsed = JSON.parse(raw) as Partial<StoredGoogleAuth>;
-      if (!parsed.accessToken || typeof parsed.expiresAt !== 'number') {
-        return null;
-      }
-      return {
-        accessToken: parsed.accessToken,
-        refreshToken: parsed.refreshToken,
-        expiresAt: parsed.expiresAt,
-        scopes: Array.isArray(parsed.scopes) ? parsed.scopes : [],
-        tokenType: parsed.tokenType,
-        profile: parsed.profile,
-      };
+      return decodeGoogleAuthFromStorage(JSON.parse(raw));
     } catch (err: unknown) {
       if (getErrorCode(err) !== 'ENOENT') {
         log.warn('Failed to read Google auth file:', getErrorMessage(err));
@@ -320,7 +315,10 @@ export class GoogleAuthManager {
 
   private async writeStoredAuth(stored: StoredGoogleAuth): Promise<void> {
     await fs.mkdir(path.dirname(this.authFilePath), { recursive: true });
-    await fs.writeFile(this.authFilePath, JSON.stringify(stored, null, 2), { encoding: 'utf-8', mode: 0o600 });
+    await fs.writeFile(this.authFilePath, JSON.stringify(encodeGoogleAuthForStorage(stored), null, 2), {
+      encoding: 'utf-8',
+      mode: 0o600,
+    });
     await fs.chmod(this.authFilePath, 0o600).catch(() => undefined);
   }
 
@@ -363,6 +361,35 @@ export function buildGoogleAuthUrl({
   url.searchParams.set('access_type', 'offline');
   url.searchParams.set('prompt', 'consent');
   return url.toString();
+}
+
+export function encodeGoogleAuthForStorage(stored: StoredGoogleAuth): StoredGoogleAuth | StoredGoogleAuthEnvelope {
+  if (!safeStorage.isEncryptionAvailable()) {
+    log.warn('Electron safeStorage encryption is unavailable; Google auth file will use filesystem permissions only.');
+    return stored;
+  }
+
+  return {
+    version: 2,
+    encrypted: true,
+    cipherText: safeStorage.encryptString(JSON.stringify(stored)).toString('base64'),
+  };
+}
+
+export function decodeGoogleAuthFromStorage(payload: unknown): StoredGoogleAuth | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  if (isEncryptedEnvelope(payload)) {
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error('Google auth file is encrypted but local decryption is unavailable.');
+    }
+    const decrypted = safeStorage.decryptString(Buffer.from(payload.cipherText, 'base64'));
+    return parseStoredGoogleAuth(JSON.parse(decrypted));
+  }
+
+  return parseStoredGoogleAuth(payload);
 }
 
 async function postGoogleToken(body: Record<string, string>): Promise<TokenResponse> {
@@ -430,6 +457,42 @@ function parseScopes(scope: string | undefined): string[] | undefined {
   return scope.split(/\s+/).filter(Boolean);
 }
 
+function parseStoredGoogleAuth(payload: unknown): StoredGoogleAuth | null {
+  if (!isRecord(payload) || typeof payload.accessToken !== 'string' || typeof payload.expiresAt !== 'number') {
+    return null;
+  }
+
+  return {
+    accessToken: payload.accessToken,
+    refreshToken: typeof payload.refreshToken === 'string' ? payload.refreshToken : undefined,
+    expiresAt: payload.expiresAt,
+    scopes: Array.isArray(payload.scopes) ? payload.scopes.filter((scope) => typeof scope === 'string') : [],
+    tokenType: typeof payload.tokenType === 'string' ? payload.tokenType : undefined,
+    profile: parseStoredProfile(payload.profile),
+  };
+}
+
+function parseStoredProfile(payload: unknown): StoredGoogleAuth['profile'] {
+  if (!isRecord(payload)) {
+    return undefined;
+  }
+
+  return {
+    email: typeof payload.email === 'string' ? payload.email : undefined,
+    name: typeof payload.name === 'string' ? payload.name : undefined,
+    picture: typeof payload.picture === 'string' ? payload.picture : undefined,
+    youtubeChannelTitle: typeof payload.youtubeChannelTitle === 'string' ? payload.youtubeChannelTitle : undefined,
+  };
+}
+
+function isEncryptedEnvelope(payload: Record<string, unknown>): payload is StoredGoogleAuthEnvelope {
+  return payload.version === 2 && payload.encrypted === true && typeof payload.cipherText === 'string';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -444,7 +507,7 @@ function getErrorMessage(err: unknown): string {
 }
 
 function getErrorCode(err: unknown): unknown {
-  return typeof err === 'object' && err !== null && 'code' in err ? err.code : undefined;
+  return isRecord(err) ? err.code : undefined;
 }
 
 function asError(err: unknown): Error {

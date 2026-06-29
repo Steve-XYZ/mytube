@@ -1,12 +1,19 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { ipcMain } from 'electron';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ipcMain, safeStorage } from 'electron';
 import { IPC_CHANNELS } from '../../src/shared/types';
-import { buildGoogleAuthUrl, createCodeChallenge, GoogleAuthManager } from '../../src/main/auth/GoogleAuthManager';
+import {
+  buildGoogleAuthUrl,
+  createCodeChallenge,
+  decodeGoogleAuthFromStorage,
+  encodeGoogleAuthForStorage,
+  GoogleAuthManager,
+} from '../../src/main/auth/GoogleAuthManager';
 
 describe('GoogleAuthManager', () => {
   afterEach(() => {
     delete process.env.MYTUBE_GOOGLE_OAUTH_CLIENT_ID;
     delete process.env.GOOGLE_OAUTH_CLIENT_ID;
+    vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(true);
     ipcMain.removeHandler(IPC_CHANNELS.AUTH_GOOGLE_STATUS);
     ipcMain.removeHandler(IPC_CHANNELS.AUTH_GOOGLE_SIGN_IN);
     ipcMain.removeHandler(IPC_CHANNELS.AUTH_GOOGLE_SIGN_OUT);
@@ -60,5 +67,44 @@ describe('GoogleAuthManager', () => {
     expect(authUrl.searchParams.get('access_type')).toBe('offline');
     expect(authUrl.searchParams.get('prompt')).toBe('consent');
     expect(authUrl.searchParams.get('scope')).toContain('https://www.googleapis.com/auth/youtube.readonly');
+  });
+
+  it('encrypts stored Google auth when safeStorage is available', () => {
+    const stored = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 1000,
+      scopes: ['openid', 'email'],
+      profile: { email: 'user@example.com' },
+    };
+
+    const encoded = encodeGoogleAuthForStorage(stored);
+
+    expect(encoded).toMatchObject({ version: 2, encrypted: true });
+    expect(JSON.stringify(encoded)).not.toContain('refresh-token');
+    expect(decodeGoogleAuthFromStorage(encoded)).toEqual(stored);
+  });
+
+  it('keeps legacy plain auth readable for existing installs', () => {
+    const legacy = {
+      accessToken: 'legacy-access-token',
+      refreshToken: 'legacy-refresh-token',
+      expiresAt: 123,
+      scopes: ['profile'],
+    };
+
+    expect(decodeGoogleAuthFromStorage(legacy)).toEqual(legacy);
+  });
+
+  it('falls back to plaintext storage when safeStorage encryption is unavailable', () => {
+    vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(false);
+    const stored = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 1000,
+      scopes: ['openid'],
+    };
+
+    expect(encodeGoogleAuthForStorage(stored)).toEqual(stored);
   });
 });

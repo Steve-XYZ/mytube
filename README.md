@@ -82,8 +82,9 @@ MYTUBE_GOOGLE_OAUTH_CLIENT_ID="your-client-id.apps.googleusercontent.com" pnpm r
 ```
 
 The connected account status is shown in Settings -> Account. Tokens are stored
-under Electron `userData` in `google-auth.json` with restricted file permissions
-where supported by the OS.
+under Electron `userData` in `google-auth.json`, encrypted with Electron
+`safeStorage` when local OS-backed encryption is available, and written with
+restricted file permissions as a fallback.
 
 ## Validation
 

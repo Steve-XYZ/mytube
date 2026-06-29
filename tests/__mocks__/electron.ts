@@ -47,6 +47,11 @@ vi.mock('electron', () => {
       openPath: vi.fn(),
       showItemInFolder: vi.fn(),
     },
+    safeStorage: {
+      isEncryptionAvailable: vi.fn(() => true),
+      encryptString: vi.fn((value: string) => Buffer.from(`encrypted:${value}`, 'utf-8')),
+      decryptString: vi.fn((value: Buffer) => value.toString('utf-8').replace(/^encrypted:/, '')),
+    },
     nativeTheme: {
       themeSource: 'system',
     },
