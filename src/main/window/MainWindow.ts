@@ -15,6 +15,7 @@ import { MediaDetector } from '../media/MediaDetector';
 import { SettingsManager } from '../settings/SettingsManager';
 import { AutoUpdater } from '../updater/AutoUpdater';
 import { AppMenu } from './AppMenu';
+import { GoogleAuthManager } from '../auth/GoogleAuthManager';
 
 export class MainWindow {
   private window: BaseWindow;
@@ -24,6 +25,7 @@ export class MainWindow {
   private downloadManager: DownloadManager;
   private mediaDetector: MediaDetector;
   private settingsManager: SettingsManager;
+  private googleAuthManager: GoogleAuthManager;
   private autoUpdater: AutoUpdater;
   private shellOverlayOpen = false;
 
@@ -56,10 +58,11 @@ export class MainWindow {
 
     // Initialize managers
     this.settingsManager = new SettingsManager(this.appView.webContents);
+    this.googleAuthManager = new GoogleAuthManager();
     this.mediaDetector = new MediaDetector(this.appView.webContents);
     this.tabManager = new TabManager(this.window, this.appView, preloadPath, this.settingsManager, this.mediaDetector);
     this.keyboardShortcuts = new KeyboardShortcuts(this.window, this.tabManager, this.appView);
-    this.downloadManager = new DownloadManager(this.appView.webContents, this.settingsManager);
+    this.downloadManager = new DownloadManager(this.appView.webContents, this.settingsManager, this.tabManager);
     this.autoUpdater = new AutoUpdater(this.appView.webContents);
 
     // Set up native app menu
@@ -168,6 +171,7 @@ export class MainWindow {
     this.downloadManager.destroy();
     this.mediaDetector.destroy();
     this.settingsManager.destroy();
+    this.googleAuthManager.destroy();
     this.autoUpdater.destroy();
     this.tabManager.destroy();
     ipcMain.removeHandler(IPC_CHANNELS.APP_SHELL_OVERLAY_SET);

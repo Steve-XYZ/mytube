@@ -49,6 +49,12 @@ describe('IPC_CHANNELS', () => {
     expect(IPC_CHANNELS.APP_SHELL_OVERLAY_SET).toBe('app:shell-overlay-set');
   });
 
+  it('has all auth channels defined', () => {
+    expect(IPC_CHANNELS.AUTH_GOOGLE_STATUS).toBe('auth:google-status');
+    expect(IPC_CHANNELS.AUTH_GOOGLE_SIGN_IN).toBe('auth:google-sign-in');
+    expect(IPC_CHANNELS.AUTH_GOOGLE_SIGN_OUT).toBe('auth:google-sign-out');
+  });
+
   it('has zoom channels defined', () => {
     expect(IPC_CHANNELS.ZOOM_IN).toBe('zoom:in');
     expect(IPC_CHANNELS.ZOOM_OUT).toBe('zoom:out');

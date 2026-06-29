@@ -64,6 +64,18 @@ export interface VideoInfo {
   formats: VideoFormat[];
 }
 
+// ===== Auth Types =====
+export interface GoogleAuthStatus {
+  configured: boolean;
+  signedIn: boolean;
+  email?: string;
+  name?: string;
+  picture?: string;
+  youtubeChannelTitle?: string;
+  scopes?: string[];
+  error?: string;
+}
+
 // ===== IPC Channel Types =====
 export const IPC_CHANNELS = {
   // Tab management
@@ -116,6 +128,11 @@ export const IPC_CHANNELS = {
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
   SETTINGS_GET_ALL: 'settings:get-all',
+
+  // Auth
+  AUTH_GOOGLE_STATUS: 'auth:google-status',
+  AUTH_GOOGLE_SIGN_IN: 'auth:google-sign-in',
+  AUTH_GOOGLE_SIGN_OUT: 'auth:google-sign-out',
 
   // App
   APP_GET_VERSION: 'app:get-version',

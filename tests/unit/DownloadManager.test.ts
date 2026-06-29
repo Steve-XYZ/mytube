@@ -12,6 +12,11 @@ vi.mock('child_process', () => ({
     kill: vi.fn(),
     pid: 12345,
   })),
+  spawnSync: vi.fn(() => ({
+    status: 0,
+    stdout: '2026.01.01\n',
+    stderr: '',
+  })),
 }));
 
 // Mock fs for state persistence tests
