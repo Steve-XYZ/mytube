@@ -104,6 +104,13 @@ pnpm run build:all
 pnpm run dev:electron
 ```
 
+Run the Electron smoke test when changing launch, packaging, shell, or browser
+window behavior:
+
+```bash
+pnpm run test:e2e
+```
+
 Package locally:
 
 ```bash

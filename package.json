@@ -30,6 +30,7 @@
     "format:check": "prettier --check 'src/**/*.{ts,tsx}' 'tests/**/*.ts'",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:e2e": "pnpm run build:all && playwright test",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },
@@ -45,6 +46,7 @@
   "packageManager": "pnpm@10.29.3",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
