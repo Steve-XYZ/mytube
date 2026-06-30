@@ -89,7 +89,7 @@ describe('Constants', () => {
   });
 
   it('has valid default URL', () => {
-    expect(DEFAULT_URL).toBe('https://www.google.com');
+    expect(DEFAULT_URL).toBe(NEW_TAB_URL);
     expect(() => new URL(DEFAULT_URL)).not.toThrow();
   });
 

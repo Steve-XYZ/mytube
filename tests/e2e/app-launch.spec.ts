@@ -13,12 +13,11 @@ test('launches the packaged renderer shell', async () => {
       },
     });
 
+    await expect.poll(async () => app?.evaluate(({ app }) => app.isReady()) ?? false).toBe(true);
     await expect
-      .poll(async () => app?.evaluate(({ app }) => app.isReady()) ?? false)
-      .toBe(true);
-    await expect
-      .poll(async () =>
-        app?.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().map((window) => window.getTitle())) ?? [],
+      .poll(
+        async () =>
+          app?.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().map((window) => window.getTitle())) ?? [],
       )
       .toContain('MyTube');
   } finally {
