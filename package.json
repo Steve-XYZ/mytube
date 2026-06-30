@@ -17,6 +17,7 @@
     "dist:mac": "pnpm build:all && pnpm run setup:bins:mac && pnpm run setup:pot && electron-builder --mac",
     "dist:win": "pnpm build:all && pnpm run setup:bins:win && pnpm run setup:pot && electron-builder --win",
     "dist:linux": "pnpm build:all && pnpm run setup:bins:linux && pnpm run setup:pot && electron-builder --linux",
+    "release:check": "node scripts/verify-release-env.cjs",
     "icons": "bash scripts/generate-icons.sh",
     "setup": "pnpm run setup:bins && pnpm run setup:pot",
     "setup:bins": "bash scripts/download-binaries.sh",

@@ -54,7 +54,7 @@ The project is in post-stabilization pre-release. The app shell, browser tab sys
 - GitHub Actions PR CI covers tests, typecheck, lint, format, and build.
 - No E2E coverage exists for browser navigation, tabs, download flows, or packaging smoke tests.
 - Persistence is JSON-backed for now, not SQLite.
-- Release signing/notarization is not configured.
+- Release signing/notarization configuration is in place; actual signing still requires external certificates and notarization credentials.
 
 ## Validation Baseline
 
@@ -271,19 +271,19 @@ Goal: prepare public distribution.
 Tasks:
 
 - Define Apple Developer certificate requirements.
-- Configure macOS code signing.
-- Configure macOS notarization.
-- Configure Windows signing strategy.
+- Provide macOS code signing credentials through `MAC_CSC_LINK` and `MAC_CSC_KEY_PASSWORD`.
+- Provide macOS notarization credentials through Apple ID, App Store Connect API key, or keychain profile secrets.
+- Provide Windows signing credentials through `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`.
 - Review entitlements.
 - Review Electron security checklist.
 - Validate no renderer Node access.
 - Validate permission handling for web contents.
-- Define update signing/release process.
+- Keep `pnpm run release:check` passing before release builds.
 
 Acceptance:
 
-- macOS release is signed and notarized.
-- Windows release is signed or the limitation is explicitly documented.
+- macOS release is signed and notarized when credentials are configured.
+- Windows release is signed when credentials are configured, or the unsigned limitation is explicitly documented.
 - Security posture is documented before public distribution.
 
 ### 10. Product and UX Hardening
@@ -394,7 +394,7 @@ Exit criteria:
 | CI only covers static/unit/build gates | Browser behavior can still regress | Expand Electron E2E beyond launch smoke |
 | Live media sites change behavior | Tests can become flaky | Use mocked binaries for CI and live smoke tests only manually |
 | JSON persistence may not scale | Download queue could become brittle | Decide JSON vs SQLite before heavy queue features |
-| Signing/notarization not configured | Public release blocked | Plan certificates and release process early |
+| Signing/notarization credentials are external | Public release requires private credentials | Keep hooks configured and fail strict checks with `MYTUBE_REQUIRE_SIGNING=1` |
 
 ## Definition of Done for V1
 

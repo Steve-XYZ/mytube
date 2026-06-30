@@ -186,10 +186,11 @@ Current media validation evidence:
 ## Release Readiness Checklist
 
 - Keep PR CI green for test, typecheck, lint, format, and build.
+- Run `pnpm run release:check` before packaging.
 - Verify `pnpm install` on a clean macOS and Windows machine.
 - Verify `pnpm run setup:bins` on supported platforms.
 - Run `pnpm run icons` after changing `image.png`.
 - Verify `pnpm run dev:electron` starts and basic navigation works.
 - Verify video download and image download flows.
 - Verify macOS and Windows packaging on their native platforms.
-- Configure signing and notarization credentials before public release.
+- Configure signing and notarization credentials before public release; see [docs/release-signing.md](docs/release-signing.md).
