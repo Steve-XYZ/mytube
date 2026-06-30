@@ -172,6 +172,10 @@ parser treats Electron's Node mode like a normal Node.js process.
 
 YouTube currently enforces Proof-of-Origin tokens for some clients and traffic patterns. MyTube does not rely on Google login inside the Electron browser because Google can mark embedded browsers as untrusted. Instead, the main process calls `yt-dlp` in public mode first, skips exporting YouTube cookies by default, and uses the local PO-token provider when `pnpm run setup` has installed it.
 
+## Platform Support
+
+The supported-platform matrix lives in [docs/supported-platforms.md](docs/supported-platforms.md). Keep product and marketing claims aligned with that file; MyTube should not be described as a universal downloader or as a tool for bypassing DRM, paid access, login walls, or rights holder restrictions.
+
 Current media validation evidence:
 
 - Image downloads save under `~/Downloads/MyTube/Images` in development and report success/failure in the UI.

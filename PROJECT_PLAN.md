@@ -376,11 +376,12 @@ Exit criteria:
 
 ## Immediate Next Actions
 
-1. Add GitHub Actions CI for the current validation baseline.
-2. Add first Electron E2E smoke test for launch, navigation, tabs, and one mocked download flow.
-3. Verify `pnpm run setup` on a clean macOS arm64 checkout and document any manual fallback.
+1. Expand Electron E2E beyond launch to navigation, tabs, and one mocked download flow.
+2. Verify `pnpm run setup` on a clean macOS arm64 checkout and document any manual fallback.
+3. Verify `pnpm run setup` and installer packaging on Windows x64.
 4. Validate packaged app launch with `pnpm run pack`.
 5. Audit the PO-token provider and define the production packaging/security stance.
+6. Keep `docs/supported-platforms.md` aligned with URL classifier support and QA evidence.
 
 ## Current Risk Register
 
@@ -390,7 +391,7 @@ Exit criteria:
 | External PO-token provider has its own dependency tree | Supply-chain/security risk for production builds | Pin commits, audit dependencies, and decide whether to bundle, install on setup, or make optional |
 | YouTube can reject anonymous guest sessions | Some public videos still cannot be extracted | Surface clear errors, avoid embedded Google login, and consider browser-captured signed media URLs as a future fallback |
 | Packaged binary resolution unverified | Downloads may work in dev but fail in release | Add packaged smoke test |
-| No CI | Regressions can merge unnoticed | Add PR workflow before larger feature work |
+| CI only covers static/unit/build gates | Browser behavior can still regress | Expand Electron E2E beyond launch smoke |
 | Live media sites change behavior | Tests can become flaky | Use mocked binaries for CI and live smoke tests only manually |
 | JSON persistence may not scale | Download queue could become brittle | Decide JSON vs SQLite before heavy queue features |
 | Signing/notarization not configured | Public release blocked | Plan certificates and release process early |
@@ -409,3 +410,4 @@ MyTube can be considered V1-ready when:
 - CI validates tests, typecheck, lint, format, and build.
 - E2E smoke tests cover launch/navigation/download basics.
 - Release signing/notarization strategy is complete or explicitly documented for internal-only distribution.
+- Platform claims match `docs/supported-platforms.md`.
