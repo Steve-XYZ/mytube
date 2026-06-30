@@ -418,6 +418,10 @@ export class DownloadManager {
       const items = Array.from(this.downloads.values())
         .filter((d) => d.status !== 'downloading')
         .map((d) => ({ ...d, speed: undefined, eta: undefined }));
+      const dir = path.dirname(this.stateFilePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
       const tmpPath = `${this.stateFilePath}.tmp`;
       fs.writeFileSync(tmpPath, JSON.stringify(items, null, 2));
       fs.renameSync(tmpPath, this.stateFilePath);

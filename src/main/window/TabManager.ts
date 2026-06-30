@@ -142,7 +142,7 @@ export class TabManager implements MediaFallbackProvider {
     }
 
     const tabId = `tab-${this.nextTabId++}`;
-    const targetUrl = url || DEFAULT_URL;
+    const targetUrl = this.normalizeNavigationInput(url || this.settingsManager?.getHomepage() || DEFAULT_URL);
 
     const view = new WebContentsView({
       webPreferences: {
@@ -247,20 +247,9 @@ export class TabManager implements MediaFallbackProvider {
     const tab = this.getActiveTab();
     if (!tab) return false;
 
-    let finalUrl = url.trim();
+    const finalUrl = this.normalizeNavigationInput(url);
 
-    // Detect if it's a search query or a URL
-    if (this.isSearchQuery(finalUrl)) {
-      finalUrl = this.buildSearchUrl(finalUrl);
-    } else if (
-      !finalUrl.startsWith('http://') &&
-      !finalUrl.startsWith('https://') &&
-      !finalUrl.startsWith('mytube://')
-    ) {
-      finalUrl = `https://${finalUrl}`;
-    }
-
-    // Validate URL scheme — only allow http/https
+    // Validate URL scheme before loading.
     if (!this.isAllowedUrl(finalUrl)) {
       log.warn(`Blocked navigation to disallowed URL: ${finalUrl}`);
       return false;
@@ -279,6 +268,24 @@ export class TabManager implements MediaFallbackProvider {
     }
   }
 
+  private normalizeNavigationInput(input: string): string {
+    const trimmed = input.trim();
+
+    if (!trimmed) {
+      return DEFAULT_URL;
+    }
+
+    if (this.isSearchQuery(trimmed)) {
+      return this.buildSearchUrl(trimmed);
+    }
+
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://') && !trimmed.startsWith('mytube://')) {
+      return `https://${trimmed}`;
+    }
+
+    return this.isAllowedUrl(trimmed) ? trimmed : DEFAULT_URL;
+  }
+
   private loadTabUrl(tab: ManagedTab, url: string): void {
     if (url === DEFAULT_URL) {
       tab.info.title = 'MyTube';
@@ -286,12 +293,20 @@ export class TabManager implements MediaFallbackProvider {
       tab.info.isSecure = false;
       tab.info.mediaState = 'none';
       tab.info.mediaTitle = undefined;
-      tab.view.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(this.buildNewTabPage())}`);
+      tab.view.webContents.loadURL(this.getNewTabDataUrl());
       this.notifyTabUpdate(tab.info);
       return;
     }
 
     tab.view.webContents.loadURL(url);
+  }
+
+  private getNewTabDataUrl(): string {
+    return `data:text/html;charset=utf-8,${encodeURIComponent(this.buildNewTabPage())}`;
+  }
+
+  private getDisplayUrlForLoadedUrl(url: string): string {
+    return url === this.getNewTabDataUrl() ? DEFAULT_URL : url;
   }
 
   goBack(): boolean {
@@ -398,11 +413,11 @@ export class TabManager implements MediaFallbackProvider {
     });
 
     wc.on('did-navigate', (_event, navUrl) => {
-      this.updateNavState(managedTab, navUrl);
+      this.updateNavState(managedTab, this.getDisplayUrlForLoadedUrl(navUrl));
     });
 
     wc.on('did-navigate-in-page', (_event, navUrl) => {
-      this.updateNavState(managedTab, navUrl);
+      this.updateNavState(managedTab, this.getDisplayUrlForLoadedUrl(navUrl));
     });
 
     wc.on('page-title-updated', (_event, title) => {
