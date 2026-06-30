@@ -18,6 +18,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     videoFormat: 'mp4',
     audioFormat: 'mp3',
     maxConcurrent: 3,
+    speedLimitKbps: 0,
   },
   browser: {
     homepage: 'mytube://newtab',
@@ -215,6 +216,10 @@ export class SettingsManager {
 
   getMaxConcurrent(): number {
     return this.settings.downloads.maxConcurrent;
+  }
+
+  getDownloadPreferences(): AppSettings['downloads'] {
+    return this.settings.downloads;
   }
 
   getSearchEngine(): string {

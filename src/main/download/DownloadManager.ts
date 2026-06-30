@@ -237,10 +237,15 @@ export class DownloadManager {
     this.updateDockBadge();
 
     const downloadUrl = fallback?.url || item.url;
+    const prefs = this.settingsManager?.getDownloadPreferences();
     const downloadOptions: DownloadOptions = {
       outputDir: this.defaultDownloadDir,
       formatId: fallback ? undefined : item.format,
-      audioOnly: item.type === 'audio',
+      audioOnly: item.type === 'audio' || prefs?.videoQuality === 'audio-only',
+      videoQuality: prefs?.videoQuality,
+      videoFormat: prefs?.videoFormat,
+      audioFormat: prefs?.audioFormat,
+      speedLimitKbps: prefs?.speedLimitKbps,
       httpHeaders: fallback?.requestHeaders,
       refererUrl: fallback?.pageUrl,
       cookieSourceUrls: fallback ? [fallback.pageUrl] : undefined,

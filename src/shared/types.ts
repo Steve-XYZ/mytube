@@ -160,6 +160,7 @@ export interface AppSettings {
     videoFormat: 'mp4' | 'mkv' | 'webm';
     audioFormat: 'mp3' | 'm4a' | 'opus';
     maxConcurrent: number;
+    speedLimitKbps: number;
   };
   browser: {
     homepage: string;

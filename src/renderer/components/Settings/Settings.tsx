@@ -357,6 +357,21 @@ function DownloadSettings({
           <option value="10">10</option>
         </select>
       </div>
+
+      <div className="settings-row">
+        <div className="settings-label">
+          <span>Speed limit</span>
+          <span className="settings-description">0 means unlimited. Applies to new downloads.</span>
+        </div>
+        <input
+          type="number"
+          className="settings-input settings-input-number"
+          min="0"
+          step="128"
+          value={settings.downloads.speedLimitKbps}
+          onChange={(e) => onUpdate('downloads.speedLimitKbps', Math.max(0, parseInt(e.target.value, 10) || 0))}
+        />
+      </div>
     </div>
   );
 }
