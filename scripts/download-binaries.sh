@@ -23,8 +23,31 @@ download() { # url dest
   local url="$1" dest="$2" tmp="$2.tmp"
   mkdir -p "$(dirname "$dest")"
   rm -f "$tmp"
-  "${CURL[@]}" -o "$tmp" "$url"
+  if ! "${CURL[@]}" -o "$tmp" "$url"; then
+    rm -f "$tmp"
+    echo "ERROR: failed to download $url" >&2
+    echo "       Re-run this command, or set MYTUBE_USE_SYSTEM_BINARIES=1 to copy tools from PATH for local development." >&2
+    return 1
+  fi
+  if [ ! -s "$tmp" ]; then
+    rm -f "$tmp"
+    echo "ERROR: downloaded empty file from $url" >&2
+    return 1
+  fi
   mv "$tmp" "$dest"
+}
+
+copy_from_path() { # command dest
+  local command_name="$1" dest="$2" source
+  source="$(command -v "$command_name" || true)"
+  if [ -z "$source" ]; then
+    return 1
+  fi
+  mkdir -p "$(dirname "$dest")"
+  cp "$source" "$dest"
+  chmod +x "$dest" 2>/dev/null || true
+  echo "    copied $command_name from PATH: $source"
+  return 0
 }
 
 # Portable zip extraction so this runs on macOS/Linux (unzip) and Windows CI
@@ -58,6 +81,15 @@ host_target() {
 
 fetch_ytdlp() { # os arch destdir
   local os="$1" arch="$2" dir="$3"
+  if [ "${MYTUBE_USE_SYSTEM_BINARIES:-0}" = "1" ]; then
+    local exe=""; [ "$os" = "win" ] && exe=".exe"
+    if copy_from_path "yt-dlp$exe" "$dir/yt-dlp$exe" || copy_from_path "yt-dlp" "$dir/yt-dlp$exe"; then
+      return
+    fi
+    echo "ERROR: MYTUBE_USE_SYSTEM_BINARIES=1 but yt-dlp was not found on PATH" >&2
+    return 1
+  fi
+
   case "$os" in
     mac)
       local dest="$dir/yt-dlp"
@@ -76,7 +108,17 @@ fetch_ytdlp() { # os arch destdir
 
 fetch_ffmpeg() { # os arch destdir
   local os="$1" arch="$2" dir="$3" tmp
+  if [ "${MYTUBE_USE_SYSTEM_BINARIES:-0}" = "1" ]; then
+    local exe=""; [ "$os" = "win" ] && exe=".exe"
+    if copy_from_path "ffmpeg$exe" "$dir/ffmpeg$exe" && copy_from_path "ffprobe$exe" "$dir/ffprobe$exe"; then
+      return
+    fi
+    echo "ERROR: MYTUBE_USE_SYSTEM_BINARIES=1 but ffmpeg/ffprobe were not both found on PATH" >&2
+    return 1
+  fi
+
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/mytube-ffmpeg.XXXXXX")"
+  trap 'rm -rf "$tmp"' RETURN
   case "$os" in
     mac)
       local fm fp
@@ -103,6 +145,7 @@ fetch_ffmpeg() { # os arch destdir
       mv "$bindir/ffmpeg.exe" "$dir/ffmpeg.exe"; mv "$bindir/ffprobe.exe" "$dir/ffprobe.exe" ;;
   esac
   rm -rf "$tmp"
+  trap - RETURN
 }
 
 stage_target() { # os arch
