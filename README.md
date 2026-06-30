@@ -21,7 +21,7 @@ Known gaps:
 
 - `bin/` is generated locally and ignored by git; `pnpm run setup` must populate it before media download flows work on a fresh checkout.
 - Notarization and signed release publishing still require project credentials.
-- There is no CI workflow yet.
+- PR CI now covers tests, typecheck, lint, format, and build. Installer packaging is still handled separately by the tag/manual build workflow.
 - There is no automated E2E coverage yet.
 - YouTube can still reject anonymous guest sessions for some videos/networks before downloadable formats are returned.
 - The PO-token provider is an external setup-time component and should be reviewed before production distribution.
@@ -174,7 +174,7 @@ Current media validation evidence:
 
 ## Release Readiness Checklist
 
-- Add CI for test, typecheck, lint, format, and build.
+- Keep PR CI green for test, typecheck, lint, format, and build.
 - Verify `pnpm install` on a clean macOS and Windows machine.
 - Verify `pnpm run setup:bins` on supported platforms.
 - Run `pnpm run icons` after changing `image.png`.

@@ -20,7 +20,7 @@ Branch: `master`
 
 Latest stabilization merge: https://github.com/Steve-XYZ/mytube/pull/1
 
-The project is in post-stabilization pre-release. The app shell, browser tab system, preload bridge, download managers, settings UI, and unit tests exist. Local validation is healthy, media binaries can be installed through `pnpm run setup`, and representative video/image download flows have been smoke-tested. Packaging, CI, end-to-end testing, and release hardening still need work.
+The project is in post-stabilization pre-release. The app shell, browser tab system, preload bridge, download managers, settings UI, and unit tests exist. Local validation is healthy, media binaries can be installed through `pnpm run setup`, and representative video/image download flows have been smoke-tested. PR CI exists for the static/unit gates, while end-to-end testing, release verification, signing, and broader product polish still need work.
 
 ### Confirmed Working
 
@@ -51,7 +51,7 @@ The project is in post-stabilization pre-release. The app shell, browser tab sys
 - The PO-token provider is an external component pinned to `bgutil-ytdlp-pot-provider` `1.3.1` commit `7608dd51ee813b48cf9a6d68c6e42cb197ce10e0`; its dependency tree needs production security review.
 - YouTube can still reject anonymous guest sessions for specific videos/networks before formats are returned, even with PO-token support.
 - Packaging has not been verified end-to-end.
-- No GitHub Actions CI exists yet.
+- GitHub Actions PR CI covers tests, typecheck, lint, format, and build.
 - No E2E coverage exists for browser navigation, tabs, download flows, or packaging smoke tests.
 - Persistence is JSON-backed for now, not SQLite.
 - Release signing/notarization is not configured.
@@ -203,19 +203,18 @@ Acceptance:
 - Corrupt local state cannot prevent app launch.
 - Persistence strategy is documented.
 
-### 6. Add CI
+### 6. Maintain CI
 
-Goal: prevent regressions from merging.
+Goal: prevent regressions from merging and keep release packaging separate from fast PR validation.
 
 Tasks:
 
-- Add GitHub Actions workflow for pull requests.
-- Run `pnpm install`.
-- Run `pnpm run test`.
-- Run `pnpm run typecheck`.
-- Run `pnpm run lint`.
-- Run `pnpm run format:check`.
-- Run `pnpm run build:all`.
+- Keep the pull request workflow running `pnpm install --frozen-lockfile`.
+- Keep `pnpm run test`.
+- Keep `pnpm run typecheck`.
+- Keep `pnpm run lint`.
+- Keep `pnpm run format:check`.
+- Keep `pnpm run build:all`.
 - Add optional packaging smoke jobs for macOS and Windows.
 - Cache pnpm store safely.
 
