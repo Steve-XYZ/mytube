@@ -56,6 +56,10 @@ export function DownloadPanel({ visible, onClose }: DownloadPanelProps) {
     window.electronAPI.cancelDownload(id);
   }, []);
 
+  const handleRetry = useCallback((id: string) => {
+    window.electronAPI.retryDownload(id);
+  }, []);
+
   const handleOpenFile = useCallback((id: string) => {
     window.electronAPI.openDownloadFile(id);
   }, []);
@@ -174,9 +178,16 @@ export function DownloadPanel({ visible, onClose }: DownloadPanelProps) {
                 </>
               )}
               {item.status === 'failed' && (
-                <button className="dp-action-btn" onClick={() => handleRemove(item.id)} title="Remove">
-                  ✕
-                </button>
+                <>
+                  {item.error !== 'Cancelled' && (
+                    <button className="dp-action-btn" onClick={() => handleRetry(item.id)} title="Retry">
+                      ↻
+                    </button>
+                  )}
+                  <button className="dp-action-btn" onClick={() => handleRemove(item.id)} title="Remove">
+                    ✕
+                  </button>
+                </>
               )}
             </div>
           </div>

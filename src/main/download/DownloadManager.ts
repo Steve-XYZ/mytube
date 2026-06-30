@@ -84,6 +84,11 @@ export class DownloadManager {
       return this.resumeDownload(id);
     });
 
+    ipcMain.handle(IPC_CHANNELS.DOWNLOAD_RETRY, (_event, id: string) => {
+      if (typeof id !== 'string') return false;
+      return this.retryDownload(id);
+    });
+
     ipcMain.handle(IPC_CHANNELS.DOWNLOAD_CANCEL, (_event, id: string) => {
       if (typeof id !== 'string') return false;
       return this.cancelDownload(id);
@@ -179,6 +184,7 @@ export class DownloadManager {
 
     this.downloads.set(id, item);
     this.notifyUpdate(item);
+    this.saveState();
 
     // Fetch video info for title if not provided
     if (!options?.title) {
@@ -332,6 +338,24 @@ export class DownloadManager {
     if (!item || item.status !== 'paused') return false;
     item.status = 'queued';
     this.notifyUpdate(item);
+    this.saveState();
+    this.processQueue();
+    return true;
+  }
+
+  retryDownload(id: string): boolean {
+    const item = this.downloads.get(id);
+    if (!item || item.status !== 'failed') return false;
+
+    item.status = 'queued';
+    item.error = undefined;
+    item.progress = 0;
+    item.speed = undefined;
+    item.eta = undefined;
+    item.totalSize = undefined;
+    item.downloadedSize = undefined;
+    this.notifyUpdate(item);
+    this.saveState();
     this.processQueue();
     return true;
   }
@@ -387,9 +411,11 @@ export class DownloadManager {
   private saveState(): void {
     try {
       const items = Array.from(this.downloads.values())
-        .filter((d) => d.status === 'completed' || d.status === 'paused')
+        .filter((d) => d.status !== 'downloading')
         .map((d) => ({ ...d, speed: undefined, eta: undefined }));
-      fs.writeFileSync(this.stateFilePath, JSON.stringify(items, null, 2));
+      const tmpPath = `${this.stateFilePath}.tmp`;
+      fs.writeFileSync(tmpPath, JSON.stringify(items, null, 2));
+      fs.renameSync(tmpPath, this.stateFilePath);
     } catch (err: unknown) {
       if (getErrorCode(err) === 'ENOSPC') {
         log.error('Disk full — cannot save download state');
@@ -404,9 +430,11 @@ export class DownloadManager {
       if (fs.existsSync(this.stateFilePath)) {
         const data = JSON.parse(fs.readFileSync(this.stateFilePath, 'utf-8'));
         for (const item of data) {
-          // Reset paused downloads to queued on restart
-          if (item.status === 'paused') {
-            item.status = 'paused'; // Keep paused, user must manually resume
+          if (!item || typeof item.id !== 'string') {
+            continue;
+          }
+          if (item.status === 'downloading') {
+            item.status = 'paused';
           }
           this.downloads.set(item.id, item);
         }
@@ -486,6 +514,7 @@ export class DownloadManager {
     ipcMain.removeHandler(IPC_CHANNELS.DOWNLOAD_START);
     ipcMain.removeHandler(IPC_CHANNELS.DOWNLOAD_PAUSE);
     ipcMain.removeHandler(IPC_CHANNELS.DOWNLOAD_RESUME);
+    ipcMain.removeHandler(IPC_CHANNELS.DOWNLOAD_RETRY);
     ipcMain.removeHandler(IPC_CHANNELS.DOWNLOAD_CANCEL);
     ipcMain.removeHandler(IPC_CHANNELS.DOWNLOAD_LIST);
     ipcMain.removeHandler(IPC_CHANNELS.MEDIA_GET_INFO);

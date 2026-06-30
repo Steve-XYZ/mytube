@@ -113,6 +113,7 @@ export const IPC_CHANNELS = {
   DOWNLOAD_START: 'download:start',
   DOWNLOAD_PAUSE: 'download:pause',
   DOWNLOAD_RESUME: 'download:resume',
+  DOWNLOAD_RETRY: 'download:retry',
   DOWNLOAD_CANCEL: 'download:cancel',
   DOWNLOAD_PROGRESS: 'download:progress',
   DOWNLOAD_COMPLETE: 'download:complete',
