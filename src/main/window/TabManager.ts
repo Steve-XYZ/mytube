@@ -175,7 +175,7 @@ export class TabManager implements MediaFallbackProvider {
     this.setupContextMenu(managedTab);
     this.mediaDetector?.registerTabWebContents(view.webContents.id);
 
-    view.webContents.loadURL(targetUrl);
+    this.loadTabUrl(managedTab, targetUrl);
     this.switchTab(tabId);
 
     log.info(`Tab created: ${tabId} -> ${targetUrl}`);
@@ -224,7 +224,7 @@ export class TabManager implements MediaFallbackProvider {
     if (tab.suspendedUrl) {
       const restoredUrl = tab.suspendedUrl;
       tab.suspendedUrl = undefined;
-      tab.view.webContents.loadURL(restoredUrl);
+      this.loadTabUrl(tab, restoredUrl);
       log.info(`Restored suspended tab ${tabId}: ${restoredUrl}`);
     }
 
@@ -252,7 +252,11 @@ export class TabManager implements MediaFallbackProvider {
     // Detect if it's a search query or a URL
     if (this.isSearchQuery(finalUrl)) {
       finalUrl = this.buildSearchUrl(finalUrl);
-    } else if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+    } else if (
+      !finalUrl.startsWith('http://') &&
+      !finalUrl.startsWith('https://') &&
+      !finalUrl.startsWith('mytube://')
+    ) {
       finalUrl = `https://${finalUrl}`;
     }
 
@@ -262,17 +266,32 @@ export class TabManager implements MediaFallbackProvider {
       return false;
     }
 
-    tab.view.webContents.loadURL(finalUrl);
+    this.loadTabUrl(tab, finalUrl);
     return true;
   }
 
   private isAllowedUrl(url: string): boolean {
     try {
       const parsed = new URL(url);
-      return ['http:', 'https:', 'blob:', 'about:'].includes(parsed.protocol);
+      return ['http:', 'https:', 'blob:', 'about:', 'mytube:'].includes(parsed.protocol);
     } catch {
       return false;
     }
+  }
+
+  private loadTabUrl(tab: ManagedTab, url: string): void {
+    if (url === DEFAULT_URL) {
+      tab.info.title = 'MyTube';
+      tab.info.url = DEFAULT_URL;
+      tab.info.isSecure = false;
+      tab.info.mediaState = 'none';
+      tab.info.mediaTitle = undefined;
+      tab.view.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(this.buildNewTabPage())}`);
+      this.notifyTabUpdate(tab.info);
+      return;
+    }
+
+    tab.view.webContents.loadURL(url);
   }
 
   goBack(): boolean {
@@ -407,11 +426,11 @@ export class TabManager implements MediaFallbackProvider {
       this.appView.webContents.send(IPC_CHANNELS.FIND_RESULT, findResult);
     });
 
-    // Block navigation to dangerous URL schemes (allow http, https, blob, about)
+    // Block navigation to dangerous URL schemes (allow http, https, blob, about, and MyTube's local new tab)
     wc.on('will-navigate', (event, navUrl) => {
       try {
         const { protocol } = new URL(navUrl);
-        if (!['http:', 'https:', 'blob:', 'about:'].includes(protocol)) {
+        if (!['http:', 'https:', 'blob:', 'about:', 'mytube:'].includes(protocol)) {
           event.preventDefault();
           log.warn(`Blocked will-navigate to: ${navUrl}`);
         }
@@ -860,6 +879,72 @@ export class TabManager implements MediaFallbackProvider {
       default:
         return `https://www.google.com/search?q=${encoded}`;
     }
+  }
+
+  private buildNewTabPage(): string {
+    const platforms = [
+      ['YouTube', 'https://www.youtube.com'],
+      ['Instagram', 'https://www.instagram.com'],
+      ['TikTok', 'https://www.tiktok.com'],
+      ['Facebook', 'https://www.facebook.com/watch'],
+      ['Vimeo', 'https://vimeo.com'],
+      ['Dailymotion', 'https://www.dailymotion.com'],
+      ['Twitch', 'https://www.twitch.tv'],
+      ['SoundCloud', 'https://soundcloud.com'],
+    ];
+    const links = platforms
+      .map(([name, href]) => `<a class="quick-link" href="${href}"><span>${name}</span></a>`)
+      .join('');
+
+    return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MyTube</title>
+  <style>
+    :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: start center; background: Canvas; color: CanvasText; }
+    main { width: min(880px, calc(100vw - 48px)); padding: 72px 0 48px; }
+    h1 { margin: 0 0 8px; font-size: 40px; line-height: 1.1; font-weight: 700; letter-spacing: 0; }
+    .subtitle { margin: 0 0 28px; color: color-mix(in srgb, CanvasText 68%, Canvas); font-size: 15px; }
+    form { display: flex; gap: 10px; margin-bottom: 28px; }
+    input { flex: 1; min-width: 0; height: 44px; border: 1px solid color-mix(in srgb, CanvasText 18%, Canvas); border-radius: 8px; padding: 0 14px; font: inherit; background: Canvas; color: CanvasText; }
+    button { height: 44px; border: 0; border-radius: 8px; padding: 0 18px; font: inherit; font-weight: 600; color: white; background: #1f6feb; cursor: pointer; }
+    .section-title { margin: 26px 0 12px; font-size: 13px; font-weight: 700; text-transform: uppercase; color: color-mix(in srgb, CanvasText 62%, Canvas); }
+    .quick-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    .quick-link { display: flex; align-items: center; min-height: 44px; border: 1px solid color-mix(in srgb, CanvasText 14%, Canvas); border-radius: 8px; padding: 0 14px; color: CanvasText; text-decoration: none; background: color-mix(in srgb, CanvasText 4%, Canvas); }
+    .note { margin-top: 22px; max-width: 720px; color: color-mix(in srgb, CanvasText 62%, Canvas); font-size: 13px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MyTube</h1>
+    <p class="subtitle">Search, paste a media URL, or open a supported site.</p>
+    <form id="search-form">
+      <input id="search-input" autofocus placeholder="Search or enter URL" />
+      <button type="submit">Go</button>
+    </form>
+    <div class="section-title">Supported starting points</div>
+    <div class="quick-grid">${links}</div>
+    <p class="note">Downloads depend on site support, public availability, and rights. MyTube does not bypass DRM or platform restrictions.</p>
+  </main>
+  <script>
+    const form = document.getElementById('search-form');
+    const input = document.getElementById('search-input');
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const value = input.value.trim();
+      if (!value) return;
+      if (/^[a-z][a-z0-9+.-]*:/i.test(value) || value.includes('.')) {
+        location.href = value.includes('://') ? value : 'https://' + value;
+      } else {
+        location.href = 'https://www.google.com/search?q=' + encodeURIComponent(value);
+      }
+    });
+  </script>
+</body>
+</html>`;
   }
 
   private getFilenameFromUrl(url: string): string {

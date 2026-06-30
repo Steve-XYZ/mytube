@@ -1,6 +1,6 @@
 export const APP_NAME = 'MyTube';
-export const DEFAULT_URL = 'https://www.google.com';
 export const NEW_TAB_URL = 'mytube://newtab';
+export const DEFAULT_URL = NEW_TAB_URL;
 
 export const DEFAULT_WINDOW_WIDTH = 1280;
 export const DEFAULT_WINDOW_HEIGHT = 800;
