@@ -205,6 +205,34 @@ describe('DownloadManager', () => {
       expect(mgr.getDownloadList()).toEqual([]);
       mgr.destroy();
     });
+
+    it('restores interrupted in-progress downloads as paused', () => {
+      (fs.existsSync as any).mockReturnValue(true);
+      (fs.readFileSync as any).mockReturnValue(
+        JSON.stringify([
+          {
+            id: 'interrupted-1',
+            url: 'https://example.com/video',
+            title: 'Interrupted Video',
+            filename: 'video.mp4',
+            savePath: '',
+            type: 'video',
+            status: 'downloading',
+            progress: 42,
+            speed: 1024,
+            eta: 12,
+            createdAt: Date.now() - 10000,
+          },
+        ]),
+      );
+
+      const mgr = new DownloadManager(mockSender);
+      const [restored] = mgr.getDownloadList();
+
+      expect(restored.status).toBe('paused');
+      expect(restored.id).toBe('interrupted-1');
+      mgr.destroy();
+    });
   });
 
   describe('destroy', () => {

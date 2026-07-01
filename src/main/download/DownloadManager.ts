@@ -415,9 +415,7 @@ export class DownloadManager {
 
   private saveState(): void {
     try {
-      const items = Array.from(this.downloads.values())
-        .filter((d) => d.status !== 'downloading')
-        .map((d) => ({ ...d, speed: undefined, eta: undefined }));
+      const items = Array.from(this.downloads.values()).map((d) => ({ ...d, speed: undefined, eta: undefined }));
       const dir = path.dirname(this.stateFilePath);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
