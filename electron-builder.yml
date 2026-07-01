@@ -37,6 +37,7 @@ mac:
   icon: build/icon.icns
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  notarize: true
   extraResources:
     - from: bin/mac/${arch}/
       to: bin/

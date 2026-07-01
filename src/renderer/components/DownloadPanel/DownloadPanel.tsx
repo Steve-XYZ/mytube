@@ -9,6 +9,9 @@ interface DownloadPanelProps {
 
 export function DownloadPanel({ visible, onClose }: DownloadPanelProps) {
   const [downloads, setDownloads] = useState<DownloadItem[]>([]);
+  const [viewMode, setViewMode] = useState<'queue' | 'library'>('queue');
+  const [libraryQuery, setLibraryQuery] = useState('');
+  const [libraryType, setLibraryType] = useState<'all' | DownloadItem['type']>('all');
 
   // Load downloads and listen for updates
   useEffect(() => {
@@ -56,6 +59,10 @@ export function DownloadPanel({ visible, onClose }: DownloadPanelProps) {
     window.electronAPI.cancelDownload(id);
   }, []);
 
+  const handleRetry = useCallback((id: string) => {
+    window.electronAPI.retryDownload(id);
+  }, []);
+
   const handleOpenFile = useCallback((id: string) => {
     window.electronAPI.openDownloadFile(id);
   }, []);
@@ -75,6 +82,20 @@ export function DownloadPanel({ visible, onClose }: DownloadPanelProps) {
   }, []);
 
   const activeCount = downloads.filter((d) => d.status === 'downloading' || d.status === 'queued').length;
+  const completedDownloads = downloads.filter((d) => d.status === 'completed');
+  const visibleDownloads =
+    viewMode === 'queue'
+      ? downloads
+      : completedDownloads.filter((item) => {
+          const matchesType = libraryType === 'all' || item.type === libraryType;
+          const query = libraryQuery.trim().toLowerCase();
+          const matchesQuery =
+            !query ||
+            item.title.toLowerCase().includes(query) ||
+            item.filename.toLowerCase().includes(query) ||
+            item.url.toLowerCase().includes(query);
+          return matchesType && matchesQuery;
+        });
 
   if (!visible) return null;
 
@@ -82,8 +103,8 @@ export function DownloadPanel({ visible, onClose }: DownloadPanelProps) {
     <div className="download-panel">
       <div className="dp-header">
         <h3>
-          Downloads
-          {activeCount > 0 && <span className="dp-badge">{activeCount}</span>}
+          {viewMode === 'queue' ? 'Downloads' : 'Library'}
+          {viewMode === 'queue' && activeCount > 0 && <span className="dp-badge">{activeCount}</span>}
         </h3>
         <div className="dp-header-actions">
           {downloads.some((d) => d.status === 'completed' || d.status === 'failed') && (
@@ -97,15 +118,62 @@ export function DownloadPanel({ visible, onClose }: DownloadPanelProps) {
         </div>
       </div>
 
+      <div className="dp-tabs" role="tablist" aria-label="Download panel view">
+        <button
+          className={`dp-tab ${viewMode === 'queue' ? 'active' : ''}`}
+          onClick={() => setViewMode('queue')}
+          role="tab"
+          aria-selected={viewMode === 'queue'}
+        >
+          Queue
+        </button>
+        <button
+          className={`dp-tab ${viewMode === 'library' ? 'active' : ''}`}
+          onClick={() => setViewMode('library')}
+          role="tab"
+          aria-selected={viewMode === 'library'}
+        >
+          Library
+        </button>
+      </div>
+
+      {viewMode === 'library' && (
+        <div className="dp-library-tools">
+          <input
+            className="dp-library-search"
+            value={libraryQuery}
+            onChange={(e) => setLibraryQuery(e.target.value)}
+            placeholder="Search saved media"
+          />
+          <select
+            className="dp-library-filter"
+            value={libraryType}
+            onChange={(e) => setLibraryType(e.target.value as 'all' | DownloadItem['type'])}
+          >
+            <option value="all">All</option>
+            <option value="video">Video</option>
+            <option value="audio">Audio</option>
+            <option value="image">Images</option>
+          </select>
+        </div>
+      )}
+
       <div className="dp-list">
-        {downloads.length === 0 && (
+        {visibleDownloads.length === 0 && viewMode === 'queue' && (
           <div className="dp-empty">
             <p>No downloads yet</p>
             <p className="dp-empty-hint">Use the download button or right-click to start downloading</p>
           </div>
         )}
 
-        {downloads.map((item) => (
+        {visibleDownloads.length === 0 && viewMode === 'library' && (
+          <div className="dp-empty">
+            <p>No saved media</p>
+            <p className="dp-empty-hint">Completed downloads appear here</p>
+          </div>
+        )}
+
+        {visibleDownloads.map((item) => (
           <div key={item.id} className={`dp-item dp-item-${item.status}`}>
             <div className="dp-item-info">
               {item.thumbnail && <img className="dp-item-thumb" src={item.thumbnail} alt="" />}
@@ -174,9 +242,16 @@ export function DownloadPanel({ visible, onClose }: DownloadPanelProps) {
                 </>
               )}
               {item.status === 'failed' && (
-                <button className="dp-action-btn" onClick={() => handleRemove(item.id)} title="Remove">
-                  ✕
-                </button>
+                <>
+                  {item.error !== 'Cancelled' && (
+                    <button className="dp-action-btn" onClick={() => handleRetry(item.id)} title="Retry">
+                      ↻
+                    </button>
+                  )}
+                  <button className="dp-action-btn" onClick={() => handleRemove(item.id)} title="Remove">
+                    ✕
+                  </button>
+                </>
               )}
             </div>
           </div>

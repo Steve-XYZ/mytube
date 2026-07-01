@@ -80,6 +80,50 @@
   background: var(--bg-hover);
 }
 
+.dp-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.dp-tab {
+  height: 30px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dp-tab.active {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.dp-library-tools {
+  display: grid;
+  grid-template-columns: 1fr 92px;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.dp-library-search,
+.dp-library-filter {
+  min-width: 0;
+  height: 30px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 0 8px;
+}
+
 .dp-list {
   flex: 1;
   overflow-y: auto;

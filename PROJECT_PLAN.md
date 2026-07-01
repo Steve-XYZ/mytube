@@ -20,7 +20,7 @@ Branch: `master`
 
 Latest stabilization merge: https://github.com/Steve-XYZ/mytube/pull/1
 
-The project is in post-stabilization pre-release. The app shell, browser tab system, preload bridge, download managers, settings UI, and unit tests exist. Local validation is healthy, media binaries can be installed through `pnpm run setup`, and representative video/image download flows have been smoke-tested. Packaging, CI, end-to-end testing, and release hardening still need work.
+The project is in post-stabilization pre-release. The app shell, browser tab system, preload bridge, download managers, settings UI, and unit tests exist. Local validation is healthy, media binaries can be installed through `pnpm run setup`, and representative video/image download flows have been smoke-tested. PR CI exists for the static/unit gates, while end-to-end testing, release verification, signing, and broader product polish still need work.
 
 ### Confirmed Working
 
@@ -51,10 +51,10 @@ The project is in post-stabilization pre-release. The app shell, browser tab sys
 - The PO-token provider is an external component pinned to `bgutil-ytdlp-pot-provider` `1.3.1` commit `7608dd51ee813b48cf9a6d68c6e42cb197ce10e0`; its dependency tree needs production security review.
 - YouTube can still reject anonymous guest sessions for specific videos/networks before formats are returned, even with PO-token support.
 - Packaging has not been verified end-to-end.
-- No GitHub Actions CI exists yet.
+- GitHub Actions PR CI covers tests, typecheck, lint, format, and build.
 - No E2E coverage exists for browser navigation, tabs, download flows, or packaging smoke tests.
 - Persistence is JSON-backed for now, not SQLite.
-- Release signing/notarization is not configured.
+- Release signing/notarization configuration is in place; actual signing still requires external certificates and notarization credentials.
 
 ## Validation Baseline
 
@@ -203,19 +203,18 @@ Acceptance:
 - Corrupt local state cannot prevent app launch.
 - Persistence strategy is documented.
 
-### 6. Add CI
+### 6. Maintain CI
 
-Goal: prevent regressions from merging.
+Goal: prevent regressions from merging and keep release packaging separate from fast PR validation.
 
 Tasks:
 
-- Add GitHub Actions workflow for pull requests.
-- Run `pnpm install`.
-- Run `pnpm run test`.
-- Run `pnpm run typecheck`.
-- Run `pnpm run lint`.
-- Run `pnpm run format:check`.
-- Run `pnpm run build:all`.
+- Keep the pull request workflow running `pnpm install --frozen-lockfile`.
+- Keep `pnpm run test`.
+- Keep `pnpm run typecheck`.
+- Keep `pnpm run lint`.
+- Keep `pnpm run format:check`.
+- Keep `pnpm run build:all`.
 - Add optional packaging smoke jobs for macOS and Windows.
 - Cache pnpm store safely.
 
@@ -272,19 +271,19 @@ Goal: prepare public distribution.
 Tasks:
 
 - Define Apple Developer certificate requirements.
-- Configure macOS code signing.
-- Configure macOS notarization.
-- Configure Windows signing strategy.
+- Provide macOS code signing credentials through `MAC_CSC_LINK` and `MAC_CSC_KEY_PASSWORD`.
+- Provide macOS notarization credentials through Apple ID, App Store Connect API key, or keychain profile secrets.
+- Provide Windows signing credentials through `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`.
 - Review entitlements.
 - Review Electron security checklist.
 - Validate no renderer Node access.
 - Validate permission handling for web contents.
-- Define update signing/release process.
+- Keep `pnpm run release:check` passing before release builds.
 
 Acceptance:
 
-- macOS release is signed and notarized.
-- Windows release is signed or the limitation is explicitly documented.
+- macOS release is signed and notarized when credentials are configured.
+- Windows release is signed when credentials are configured, or the unsigned limitation is explicitly documented.
 - Security posture is documented before public distribution.
 
 ### 10. Product and UX Hardening
@@ -377,11 +376,12 @@ Exit criteria:
 
 ## Immediate Next Actions
 
-1. Add GitHub Actions CI for the current validation baseline.
-2. Add first Electron E2E smoke test for launch, navigation, tabs, and one mocked download flow.
-3. Verify `pnpm run setup` on a clean macOS arm64 checkout and document any manual fallback.
+1. Expand Electron E2E beyond launch to navigation, tabs, and one mocked download flow.
+2. Verify `pnpm run setup` on a clean macOS arm64 checkout and document any manual fallback.
+3. Verify `pnpm run setup` and installer packaging on Windows x64.
 4. Validate packaged app launch with `pnpm run pack`.
 5. Audit the PO-token provider and define the production packaging/security stance.
+6. Keep `docs/supported-platforms.md` aligned with URL classifier support and QA evidence.
 
 ## Current Risk Register
 
@@ -391,10 +391,10 @@ Exit criteria:
 | External PO-token provider has its own dependency tree | Supply-chain/security risk for production builds | Pin commits, audit dependencies, and decide whether to bundle, install on setup, or make optional |
 | YouTube can reject anonymous guest sessions | Some public videos still cannot be extracted | Surface clear errors, avoid embedded Google login, and consider browser-captured signed media URLs as a future fallback |
 | Packaged binary resolution unverified | Downloads may work in dev but fail in release | Add packaged smoke test |
-| No CI | Regressions can merge unnoticed | Add PR workflow before larger feature work |
+| CI only covers static/unit/build gates | Browser behavior can still regress | Expand Electron E2E beyond launch smoke |
 | Live media sites change behavior | Tests can become flaky | Use mocked binaries for CI and live smoke tests only manually |
 | JSON persistence may not scale | Download queue could become brittle | Decide JSON vs SQLite before heavy queue features |
-| Signing/notarization not configured | Public release blocked | Plan certificates and release process early |
+| Signing/notarization credentials are external | Public release requires private credentials | Keep hooks configured and fail strict checks with `MYTUBE_REQUIRE_SIGNING=1` |
 
 ## Definition of Done for V1
 
@@ -410,3 +410,4 @@ MyTube can be considered V1-ready when:
 - CI validates tests, typecheck, lint, format, and build.
 - E2E smoke tests cover launch/navigation/download basics.
 - Release signing/notarization strategy is complete or explicitly documented for internal-only distribution.
+- Platform claims match `docs/supported-platforms.md`.

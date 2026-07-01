@@ -15,7 +15,7 @@ import {
 function isAllowedUrl(url: string): boolean {
   try {
     const u = new URL(url);
-    return u.protocol === 'http:' || u.protocol === 'https:';
+    return ['http:', 'https:', 'blob:', 'about:', 'mytube:'].includes(u.protocol);
   } catch {
     return false;
   }
@@ -214,6 +214,10 @@ describe('TabManager - isAllowedUrl', () => {
     expect(isAllowedUrl('https://example.com')).toBe(true);
   });
 
+  it('allows the internal new tab URL', () => {
+    expect(isAllowedUrl('mytube://newtab')).toBe(true);
+  });
+
   it('rejects javascript: protocol', () => {
     expect(isAllowedUrl('javascript:alert(1)')).toBe(false);
   });
@@ -235,8 +239,8 @@ describe('TabManager - isAllowedUrl', () => {
     expect(isAllowedUrl('')).toBe(false);
   });
 
-  it('rejects about: URLs', () => {
-    expect(isAllowedUrl('about:blank')).toBe(false);
+  it('allows about:blank', () => {
+    expect(isAllowedUrl('about:blank')).toBe(true);
   });
 });
 

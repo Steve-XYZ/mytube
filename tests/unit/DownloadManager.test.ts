@@ -27,6 +27,7 @@ vi.mock('fs', async () => {
     existsSync: vi.fn(() => false),
     mkdirSync: vi.fn(),
     writeFileSync: vi.fn(),
+    renameSync: vi.fn(),
     readFileSync: vi.fn(() => '[]'),
   };
 });
@@ -111,6 +112,26 @@ describe('DownloadManager', () => {
     });
   });
 
+  describe('retryDownload', () => {
+    it('returns false for non-existent download', () => {
+      expect(manager.retryDownload('nonexistent')).toBe(false);
+    });
+
+    it('requeues a failed download and clears its error', async () => {
+      const item = await manager.startDownload('https://example.com/1', { title: 'Test' });
+      manager.cancelDownload(item.id);
+      (manager as unknown as { maxConcurrent: number }).maxConcurrent = 0;
+
+      const result = manager.retryDownload(item.id);
+
+      expect(result).toBe(true);
+      const retried = manager.getDownloadList().find((d) => d.id === item.id);
+      expect(retried?.status).toBe('queued');
+      expect(retried?.error).toBeUndefined();
+      expect(retried?.progress).toBe(0);
+    });
+  });
+
   describe('cancelDownload', () => {
     it('returns false for non-existent download', () => {
       expect(manager.cancelDownload('nonexistent')).toBe(false);
@@ -184,6 +205,34 @@ describe('DownloadManager', () => {
       expect(mgr.getDownloadList()).toEqual([]);
       mgr.destroy();
     });
+
+    it('restores interrupted in-progress downloads as paused', () => {
+      (fs.existsSync as any).mockReturnValue(true);
+      (fs.readFileSync as any).mockReturnValue(
+        JSON.stringify([
+          {
+            id: 'interrupted-1',
+            url: 'https://example.com/video',
+            title: 'Interrupted Video',
+            filename: 'video.mp4',
+            savePath: '',
+            type: 'video',
+            status: 'downloading',
+            progress: 42,
+            speed: 1024,
+            eta: 12,
+            createdAt: Date.now() - 10000,
+          },
+        ]),
+      );
+
+      const mgr = new DownloadManager(mockSender);
+      const [restored] = mgr.getDownloadList();
+
+      expect(restored.status).toBe('paused');
+      expect(restored.id).toBe('interrupted-1');
+      mgr.destroy();
+    });
   });
 
   describe('destroy', () => {
@@ -192,6 +241,7 @@ describe('DownloadManager', () => {
       expect(ipcMain.removeHandler).toHaveBeenCalledWith('download:start');
       expect(ipcMain.removeHandler).toHaveBeenCalledWith('download:pause');
       expect(ipcMain.removeHandler).toHaveBeenCalledWith('download:resume');
+      expect(ipcMain.removeHandler).toHaveBeenCalledWith('download:retry');
       expect(ipcMain.removeHandler).toHaveBeenCalledWith('download:cancel');
       expect(ipcMain.removeHandler).toHaveBeenCalledWith('download:list');
       expect(ipcMain.removeHandler).toHaveBeenCalledWith('download:open-file');

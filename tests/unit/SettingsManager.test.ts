@@ -59,6 +59,7 @@ describe('SettingsManager', () => {
       expect(all.downloads.videoQuality).toBe('best');
       expect(all.downloads.videoFormat).toBe('mp4');
       expect(all.downloads.audioFormat).toBe('mp3');
+      expect(all.downloads.speedLimitKbps).toBe(0);
       expect(all.browser.searchEngine).toBe('google');
     });
   });
@@ -184,6 +185,7 @@ describe('SettingsManager', () => {
         videoFormat: 'mp4',
         audioFormat: 'mp3',
         maxConcurrent: 3,
+        speedLimitKbps: 0,
       },
       browser: { homepage: 'mytube://newtab', searchEngine: 'google' },
     };
@@ -208,6 +210,7 @@ describe('SettingsManager', () => {
           videoFormat: 'mkv',
           audioFormat: 'opus',
           maxConcurrent: 5,
+          speedLimitKbps: 1024,
         },
         browser: { homepage: 'https://example.com', searchEngine: 'bing' },
       };
@@ -217,6 +220,7 @@ describe('SettingsManager', () => {
       expect(result.general.language).toBe('es');
       expect(result.downloads.maxConcurrent).toBe(5);
       expect(result.downloads.videoFormat).toBe('mkv');
+      expect(result.downloads.speedLimitKbps).toBe(1024);
       expect(result.browser.searchEngine).toBe('bing');
     });
 

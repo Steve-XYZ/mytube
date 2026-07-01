@@ -21,7 +21,7 @@ Known gaps:
 
 - `bin/` is generated locally and ignored by git; `pnpm run setup` must populate it before media download flows work on a fresh checkout.
 - Notarization and signed release publishing still require project credentials.
-- There is no CI workflow yet.
+- PR CI now covers tests, typecheck, lint, format, and build. Installer packaging is still handled separately by the tag/manual build workflow.
 - There is no automated E2E coverage yet.
 - YouTube can still reject anonymous guest sessions for some videos/networks before downloadable formats are returned.
 - The PO-token provider is an external setup-time component and should be reviewed before production distribution.
@@ -104,6 +104,13 @@ pnpm run build:all
 pnpm run dev:electron
 ```
 
+Run the Electron smoke test when changing launch, packaging, shell, or browser
+window behavior:
+
+```bash
+pnpm run test:e2e
+```
+
 Package locally:
 
 ```bash
@@ -165,6 +172,10 @@ parser treats Electron's Node mode like a normal Node.js process.
 
 YouTube currently enforces Proof-of-Origin tokens for some clients and traffic patterns. MyTube does not rely on Google login inside the Electron browser because Google can mark embedded browsers as untrusted. Instead, the main process calls `yt-dlp` in public mode first, skips exporting YouTube cookies by default, and uses the local PO-token provider when `pnpm run setup` has installed it.
 
+## Platform Support
+
+The supported-platform matrix lives in [docs/supported-platforms.md](docs/supported-platforms.md). Keep product and marketing claims aligned with that file; MyTube should not be described as a universal downloader or as a tool for bypassing DRM, paid access, login walls, or rights holder restrictions.
+
 Current media validation evidence:
 
 - Image downloads save under `~/Downloads/MyTube/Images` in development and report success/failure in the UI.
@@ -174,11 +185,12 @@ Current media validation evidence:
 
 ## Release Readiness Checklist
 
-- Add CI for test, typecheck, lint, format, and build.
+- Keep PR CI green for test, typecheck, lint, format, and build.
+- Run `pnpm run release:check` before packaging.
 - Verify `pnpm install` on a clean macOS and Windows machine.
 - Verify `pnpm run setup:bins` on supported platforms.
 - Run `pnpm run icons` after changing `image.png`.
 - Verify `pnpm run dev:electron` starts and basic navigation works.
 - Verify video download and image download flows.
 - Verify macOS and Windows packaging on their native platforms.
-- Configure signing and notarization credentials before public release.
+- Configure signing and notarization credentials before public release; see [docs/release-signing.md](docs/release-signing.md).

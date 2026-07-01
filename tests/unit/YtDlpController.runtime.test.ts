@@ -81,6 +81,17 @@ type DownloadProfile = {
 type ProfileProbe = {
   potProviderServerHome: string | null;
   getDownloadProfiles: (url: string, options: { formatId?: string }) => DownloadProfile[];
+  buildDownloadArgs: (
+    url: string,
+    options: {
+      outputDir: string;
+      videoQuality?: 'best' | '1080p' | '720p' | '480p' | 'audio-only';
+      videoFormat?: 'mp4' | 'mkv' | 'webm';
+      audioFormat?: 'mp3' | 'm4a' | 'opus';
+      speedLimitKbps?: number;
+      audioOnly?: boolean;
+    },
+  ) => string[];
   getUserFacingExtractionError: (err: unknown, url: string) => string;
   getRefererForUrl: (url: string) => string | null;
   getSafeArgsForLog: (args: string[]) => string;
@@ -151,6 +162,35 @@ describe('YtDlpController download profile selection', () => {
     const p = profileProbe('/pot');
     const potProfile = { name: 'youtube-mweb-pot', usePotProvider: true };
     expect(p.shouldRetryDownloadWithNextProfile('https://vimeo.com/1', 'whatever', potProfile)).toBe(false);
+  });
+});
+
+describe('YtDlpController download argument building', () => {
+  it('applies quality, merge format, and speed limit preferences', () => {
+    const args = profileProbe(null).buildDownloadArgs('https://example.com/video', {
+      outputDir: '/downloads',
+      videoQuality: '720p',
+      videoFormat: 'mkv',
+      speedLimitKbps: 2048,
+    });
+
+    expect(args).toContain('--merge-output-format');
+    expect(args).toContain('mkv');
+    expect(args).toContain('bv*[height<=720]+ba/b[height<=720]');
+    expect(args).toContain('--limit-rate');
+    expect(args).toContain('2048K');
+  });
+
+  it('uses the configured audio format for audio-only downloads', () => {
+    const args = profileProbe(null).buildDownloadArgs('https://example.com/video', {
+      outputDir: '/downloads',
+      videoQuality: 'audio-only',
+      audioFormat: 'm4a',
+    });
+
+    expect(args).toContain('-x');
+    expect(args).toContain('--audio-format');
+    expect(args).toContain('m4a');
   });
 });
 

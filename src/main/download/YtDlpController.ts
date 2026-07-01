@@ -12,6 +12,10 @@ export interface DownloadOptions {
   outputDir: string;
   outputTemplate?: string;
   audioOnly?: boolean;
+  videoQuality?: 'best' | '1080p' | '720p' | '480p' | 'audio-only';
+  videoFormat?: 'mp4' | 'mkv' | 'webm';
+  audioFormat?: 'mp3' | 'm4a' | 'opus';
+  speedLimitKbps?: number;
   httpHeaders?: Record<string, string>;
   refererUrl?: string;
   cookieSourceUrls?: string[];
@@ -399,21 +403,38 @@ export class YtDlpController {
   private buildDownloadArgs(url: string, options: DownloadOptions): string[] {
     const args: string[] = ['--newline', '--no-playlist', '--no-warnings'];
 
-    if (options.audioOnly) {
-      args.push('-x', '--audio-format', 'mp3', '--audio-quality', '0');
+    if (options.audioOnly || options.videoQuality === 'audio-only') {
+      args.push('-x', '--audio-format', options.audioFormat || 'mp3', '--audio-quality', '0');
     } else if (options.formatId) {
       args.push('-f', options.formatId);
     } else {
-      // Best video+audio merged into mp4
-      args.push('-f', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b');
-      args.push('--merge-output-format', 'mp4');
+      const mergeFormat = options.videoFormat || 'mp4';
+      args.push('-f', this.buildQualitySelector(options.videoQuality, mergeFormat));
+      args.push('--merge-output-format', mergeFormat);
     }
 
     const template = options.outputTemplate || '%(title)s [%(id)s].%(ext)s';
     args.push('-o', path.join(options.outputDir, template));
     args.push('--continue');
+    if (options.speedLimitKbps && options.speedLimitKbps > 0) {
+      args.push('--limit-rate', `${Math.floor(options.speedLimitKbps)}K`);
+    }
     args.push(url);
     return args;
+  }
+
+  private buildQualitySelector(
+    quality: DownloadOptions['videoQuality'] = 'best',
+    mergeFormat: DownloadOptions['videoFormat'] = 'mp4',
+  ): string {
+    const maxHeight = quality && quality !== 'best' && quality !== 'audio-only' ? Number.parseInt(quality, 10) : 0;
+    const heightFilter = maxHeight > 0 ? `[height<=${maxHeight}]` : '';
+
+    if (mergeFormat === 'mp4') {
+      return `bv*${heightFilter}[ext=mp4]+ba[ext=m4a]/b${heightFilter}[ext=mp4]/bv*${heightFilter}+ba/b${heightFilter}`;
+    }
+
+    return `bv*${heightFilter}+ba/b${heightFilter}`;
   }
 
   /** Run a single download attempt with one extraction profile. */

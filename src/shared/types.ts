@@ -113,6 +113,7 @@ export const IPC_CHANNELS = {
   DOWNLOAD_START: 'download:start',
   DOWNLOAD_PAUSE: 'download:pause',
   DOWNLOAD_RESUME: 'download:resume',
+  DOWNLOAD_RETRY: 'download:retry',
   DOWNLOAD_CANCEL: 'download:cancel',
   DOWNLOAD_PROGRESS: 'download:progress',
   DOWNLOAD_COMPLETE: 'download:complete',
@@ -159,6 +160,7 @@ export interface AppSettings {
     videoFormat: 'mp4' | 'mkv' | 'webm';
     audioFormat: 'mp3' | 'm4a' | 'opus';
     maxConcurrent: number;
+    speedLimitKbps: number;
   };
   browser: {
     homepage: string;
