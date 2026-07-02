@@ -22,7 +22,7 @@ Known gaps:
 - `bin/` is generated locally and ignored by git; `pnpm run setup` must populate it before media download flows work on a fresh checkout.
 - Notarization and signed release publishing still require project credentials.
 - PR CI now covers tests, typecheck, lint, format, build, and the Playwright E2E smoke suite. Installer packaging is still handled separately by the tag/manual build workflow.
-- E2E coverage exists for launch, tabs, navigation, settings persistence, and the download pipeline (with a mocked `yt-dlp`), but not yet for image gallery, find-in-page, or packaged-build smoke.
+- E2E coverage exists for launch, tabs, navigation, settings persistence, the download pipeline (with a mocked `yt-dlp`), the image gallery, and a packaged-build smoke with mock binaries. Find-in-page and real-binary packaged validation are not automated yet.
 - YouTube can still reject anonymous guest sessions for some videos/networks before downloadable formats are returned.
 - The PO-token provider is an external setup-time component and should be reviewed before production distribution.
 - Test code still uses a few casts around mocked Electron and Node APIs.
@@ -112,10 +112,23 @@ pnpm run test:e2e
 ```
 
 The E2E suite launches the built app with isolated state (`MYTUBE_USER_DATA_DIR`
-pointing at a temp directory) and a deterministic mock `yt-dlp`
-(`MYTUBE_BIN_DIR` pointing at `tests/e2e/fixtures/bin`), so it never depends on
-the live network or real media binaries. Navigation tests run against a local
-HTTP server started by the tests themselves.
+pointing at a temp directory, which also redirects the system downloads path)
+and a deterministic mock `yt-dlp` (`MYTUBE_BIN_DIR` pointing at
+`tests/e2e/fixtures/bin`), so it never depends on the live network or real
+media binaries. Navigation and image gallery tests run against a local HTTP
+server started by the tests themselves.
+
+Run the packaged-build smoke when changing packaging, binary resolution, or
+launch behavior:
+
+```bash
+pnpm run test:e2e:packaged
+```
+
+It stages mock media binaries into `bin/<os>/<arch>/` (unless real ones are
+already staged), packs with `electron-builder --dir`, launches the packaged
+executable, and verifies the shell plus a download resolved from the package's
+`resources/bin`. With real staged binaries the download smoke auto-skips.
 
 Package locally:
 

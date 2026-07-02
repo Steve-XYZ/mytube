@@ -32,6 +32,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "pnpm run build:all && playwright test",
+    "test:e2e:packaged": "node scripts/run-packaged-e2e.cjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },

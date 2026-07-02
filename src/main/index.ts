@@ -1,11 +1,15 @@
 import { app } from 'electron';
+import * as path from 'path';
 import { MainWindow } from './window/MainWindow';
 import log from 'electron-log/main';
 
 // Test support: isolate all persisted state (settings, downloads, session)
 // under a caller-provided directory. Must run before anything reads userData.
+// The system downloads path is redirected too so image downloads never touch
+// the real ~/Downloads during tests.
 if (process.env.MYTUBE_USER_DATA_DIR) {
   app.setPath('userData', process.env.MYTUBE_USER_DATA_DIR);
+  app.setPath('downloads', path.join(process.env.MYTUBE_USER_DATA_DIR, 'system-downloads'));
 }
 
 // Configure logging

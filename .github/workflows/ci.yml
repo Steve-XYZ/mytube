@@ -80,3 +80,36 @@ jobs:
 
       - name: Run Playwright Electron tests
         run: xvfb-run --auto-servernum -- pnpm exec playwright test
+
+  packaged-smoke:
+    name: Packaged build smoke (Electron + Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.29.3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Ubuntu 24.04 restricts unprivileged user namespaces, which breaks
+      # Chromium's sandbox when Electron runs from node_modules.
+      - name: Allow Electron sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # Stages mock media binaries, packs with electron-builder --dir, and
+      # verifies launch + packaged binary resolution end to end.
+      - name: Pack and run packaged smoke tests
+        run: xvfb-run --auto-servernum -- pnpm run test:e2e:packaged

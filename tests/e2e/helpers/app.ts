@@ -12,22 +12,31 @@ export interface LaunchedApp {
   shell: Page;
   userDataDir: string;
   downloadDir: string;
+  /** Where image downloads land (redirected system downloads dir). */
+  imagesDir: string;
   close(): Promise<void>;
 }
 
 export interface LaunchOptions {
   /** Reuse an existing userData dir to test persistence across restarts. */
   userDataDir?: string;
+  /**
+   * Launch a packaged build instead of the dev checkout. Media binaries then
+   * resolve from the package's resources/bin, not the mock fixture dir.
+   */
+  executablePath?: string;
 }
 
 /**
- * Launch the built Electron app with isolated state:
+ * Launch the Electron app with isolated state:
  * - settings/downloads/session live in a temp userData dir
- * - yt-dlp resolves to the deterministic mock in tests/e2e/fixtures/bin
+ * - system downloads are redirected under that dir
+ * - in dev mode, yt-dlp resolves to the deterministic mock in tests/e2e/fixtures/bin
  */
 export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedApp> {
   const userDataDir = options.userDataDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'mytube-e2e-'));
   const downloadDir = path.join(userDataDir, 'e2e-downloads');
+  const imagesDir = path.join(userDataDir, 'system-downloads', 'MyTube', 'Images');
   fs.mkdirSync(downloadDir, { recursive: true });
 
   const settingsPath = path.join(userDataDir, 'settings.json');
@@ -36,17 +45,21 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
     fs.writeFileSync(settingsPath, JSON.stringify({ downloads: { defaultDirectory: downloadDir } }));
   }
 
-  const app = await electron.launch({
-    args: ['.'],
-    cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      NODE_ENV: 'test',
-      MYTUBE_E2E: '1',
-      MYTUBE_USER_DATA_DIR: userDataDir,
-      MYTUBE_BIN_DIR: FIXTURE_BIN_DIR,
-    },
-  });
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    NODE_ENV: 'test',
+    MYTUBE_E2E: '1',
+    MYTUBE_USER_DATA_DIR: userDataDir,
+  };
+  if (!options.executablePath) {
+    env.MYTUBE_BIN_DIR = FIXTURE_BIN_DIR;
+  }
+
+  const app = await electron.launch(
+    options.executablePath
+      ? { executablePath: options.executablePath, args: [], env }
+      : { args: ['.'], cwd: REPO_ROOT, env },
+  );
 
   const shell = await waitForPage(app, (url) => url.includes('renderer/index.html'));
   await shell.locator('.nav-bar').waitFor({ state: 'visible', timeout: 15_000 });
@@ -56,6 +69,7 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
     shell,
     userDataDir,
     downloadDir,
+    imagesDir,
     close: async () => {
       await app.close();
       fs.rmSync(userDataDir, { recursive: true, force: true });
