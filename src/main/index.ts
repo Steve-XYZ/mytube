@@ -2,6 +2,12 @@ import { app } from 'electron';
 import { MainWindow } from './window/MainWindow';
 import log from 'electron-log/main';
 
+// Test support: isolate all persisted state (settings, downloads, session)
+// under a caller-provided directory. Must run before anything reads userData.
+if (process.env.MYTUBE_USER_DATA_DIR) {
+  app.setPath('userData', process.env.MYTUBE_USER_DATA_DIR);
+}
+
 // Configure logging
 log.initialize();
 log.info('MyTube starting...');

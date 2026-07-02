@@ -132,6 +132,11 @@ export class YtDlpController {
   }
 
   private resolveBinaryDir(): string {
+    // Test support: point the app at stub/local media binaries.
+    if (process.env.MYTUBE_BIN_DIR) {
+      return process.env.MYTUBE_BIN_DIR;
+    }
+
     // In production every platform/arch binary is flattened into resources/bin/.
     if (app.isPackaged) {
       return path.join(process.resourcesPath, 'bin');
@@ -147,6 +152,9 @@ export class YtDlpController {
    * plugins) live in resources/bin/ when packaged and under bin/shared/ in dev.
    */
   private resolveSharedResourceDir(): string {
+    if (process.env.MYTUBE_BIN_DIR) {
+      return process.env.MYTUBE_BIN_DIR;
+    }
     if (app.isPackaged) {
       return path.join(process.resourcesPath, 'bin');
     }

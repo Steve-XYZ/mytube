@@ -3,7 +3,10 @@ node_modules/
 dist/
 release/
 bin/
+!tests/e2e/fixtures/bin/
 *.log
+test-results/
+playwright-report/
 *.tgz
 .DS_Store
 Thumbs.db

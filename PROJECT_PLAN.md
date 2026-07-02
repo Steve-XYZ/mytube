@@ -51,8 +51,8 @@ The project is in post-stabilization pre-release. The app shell, browser tab sys
 - The PO-token provider is an external component pinned to `bgutil-ytdlp-pot-provider` `1.3.1` commit `7608dd51ee813b48cf9a6d68c6e42cb197ce10e0`; its dependency tree needs production security review.
 - YouTube can still reject anonymous guest sessions for specific videos/networks before formats are returned, even with PO-token support.
 - Packaging has not been verified end-to-end.
-- GitHub Actions PR CI covers tests, typecheck, lint, format, and build.
-- No E2E coverage exists for browser navigation, tabs, download flows, or packaging smoke tests.
+- GitHub Actions PR CI covers tests, typecheck, lint, format, build, and the Playwright E2E smoke suite.
+- Playwright E2E covers launch, tabs, navigation, settings persistence, and mocked download flows; image gallery, find-in-page, and packaged-build smoke tests are still missing.
 - Persistence is JSON-backed for now, not SQLite.
 - Release signing/notarization configuration is in place; actual signing still requires external certificates and notarization credentials.
 
@@ -229,18 +229,22 @@ Goal: cover behavior that unit tests cannot prove.
 
 Tasks:
 
-- Choose Playwright-based Electron test approach.
-- Add app launch test.
-- Add navigation/tab test.
-- Add settings modal test.
+- Choose Playwright-based Electron test approach. (done — `_electron.launch` against the built app; every `WebContentsView` is visible as a Playwright `Page`)
+- Add app launch test. (done — includes renderer shell render and no-Node-APIs security check)
+- Add navigation/tab test. (done — local HTTP server, URL bar, back/forward, tab create/switch/close)
+- Add settings modal test. (done — theme change applies live and persists across an app restart)
 - Add image gallery smoke test.
-- Add download flow smoke test with mocked `yt-dlp`/`ffmpeg` binaries.
+- Add download flow smoke test with mocked `yt-dlp`/`ffmpeg` binaries. (done — mock binary via `MYTUBE_BIN_DIR`; covers metadata, video, audio-only, and failure surfacing)
 - Add production build launch smoke test.
+
+Test-support hooks: `MYTUBE_USER_DATA_DIR` isolates persisted state per test run, and `MYTUBE_BIN_DIR` redirects media binary resolution to `tests/e2e/fixtures/bin`.
 
 Acceptance:
 
 - Main app workflows are tested without relying on live YouTube/network behavior.
 - CI can run a meaningful smoke suite.
+
+Status: core suite in place (11 tests) and running in PR CI under xvfb. Image gallery and packaged-build smoke remain.
 
 ### 8. Packaging and Distribution
 
@@ -350,6 +354,8 @@ Exit criteria:
 
 - CI or local E2E can prove app launch, tabs, navigation, and a download flow.
 
+Status: complete. PR CI runs the Playwright suite covering launch, tabs, navigation, settings, and mocked download flows.
+
 ### Milestone 4: Packaging
 
 Scope:
@@ -376,7 +382,7 @@ Exit criteria:
 
 ## Immediate Next Actions
 
-1. Expand Electron E2E beyond launch to navigation, tabs, and one mocked download flow.
+1. Extend E2E to the image gallery flow and a packaged-build (`pnpm run pack`) launch smoke test.
 2. Verify `pnpm run setup` on a clean macOS arm64 checkout and document any manual fallback.
 3. Verify `pnpm run setup` and installer packaging on Windows x64.
 4. Validate packaged app launch with `pnpm run pack`.
@@ -391,7 +397,7 @@ Exit criteria:
 | External PO-token provider has its own dependency tree | Supply-chain/security risk for production builds | Pin commits, audit dependencies, and decide whether to bundle, install on setup, or make optional |
 | YouTube can reject anonymous guest sessions | Some public videos still cannot be extracted | Surface clear errors, avoid embedded Google login, and consider browser-captured signed media URLs as a future fallback |
 | Packaged binary resolution unverified | Downloads may work in dev but fail in release | Add packaged smoke test |
-| CI only covers static/unit/build gates | Browser behavior can still regress | Expand Electron E2E beyond launch smoke |
+| E2E does not yet cover image gallery or packaged builds | Those flows can still regress unnoticed | Extend the Playwright suite to the gallery and a packaged-build smoke test |
 | Live media sites change behavior | Tests can become flaky | Use mocked binaries for CI and live smoke tests only manually |
 | JSON persistence may not scale | Download queue could become brittle | Decide JSON vs SQLite before heavy queue features |
 | Signing/notarization credentials are external | Public release requires private credentials | Keep hooks configured and fail strict checks with `MYTUBE_REQUIRE_SIGNING=1` |

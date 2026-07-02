@@ -21,8 +21,8 @@ Known gaps:
 
 - `bin/` is generated locally and ignored by git; `pnpm run setup` must populate it before media download flows work on a fresh checkout.
 - Notarization and signed release publishing still require project credentials.
-- PR CI now covers tests, typecheck, lint, format, and build. Installer packaging is still handled separately by the tag/manual build workflow.
-- There is no automated E2E coverage yet.
+- PR CI now covers tests, typecheck, lint, format, build, and the Playwright E2E smoke suite. Installer packaging is still handled separately by the tag/manual build workflow.
+- E2E coverage exists for launch, tabs, navigation, settings persistence, and the download pipeline (with a mocked `yt-dlp`), but not yet for image gallery, find-in-page, or packaged-build smoke.
 - YouTube can still reject anonymous guest sessions for some videos/networks before downloadable formats are returned.
 - The PO-token provider is an external setup-time component and should be reviewed before production distribution.
 - Test code still uses a few casts around mocked Electron and Node APIs.
@@ -104,12 +104,18 @@ pnpm run build:all
 pnpm run dev:electron
 ```
 
-Run the Electron smoke test when changing launch, packaging, shell, or browser
-window behavior:
+Run the Playwright E2E suite when changing launch, shell, tab, navigation,
+settings, or download behavior:
 
 ```bash
 pnpm run test:e2e
 ```
+
+The E2E suite launches the built app with isolated state (`MYTUBE_USER_DATA_DIR`
+pointing at a temp directory) and a deterministic mock `yt-dlp`
+(`MYTUBE_BIN_DIR` pointing at `tests/e2e/fixtures/bin`), so it never depends on
+the live network or real media binaries. Navigation tests run against a local
+HTTP server started by the tests themselves.
 
 Package locally:
 
