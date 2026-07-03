@@ -17,6 +17,7 @@ import { AutoUpdater } from '../updater/AutoUpdater';
 import { AppMenu } from './AppMenu';
 import { GoogleAuthManager } from '../auth/GoogleAuthManager';
 import { YtDlpUpdater, getManagedYtDlpDir } from '../download/YtDlpUpdater';
+import { readWindowState, trackWindowState } from './WindowState';
 
 export class MainWindow {
   private window: BaseWindow;
@@ -32,9 +33,16 @@ export class MainWindow {
   private shellOverlayOpen = false;
 
   constructor() {
-    this.window = new BaseWindow({
+    const windowStatePath = path.join(app.getPath('userData'), 'window-state.json');
+    const windowState = readWindowState(windowStatePath, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, {
       width: DEFAULT_WINDOW_WIDTH,
       height: DEFAULT_WINDOW_HEIGHT,
+    });
+
+    this.window = new BaseWindow({
+      width: windowState.width,
+      height: windowState.height,
+      ...(windowState.x !== undefined && windowState.y !== undefined ? { x: windowState.x, y: windowState.y } : {}),
       minWidth: MIN_WINDOW_WIDTH,
       minHeight: MIN_WINDOW_HEIGHT,
       title: APP_NAME,
@@ -42,6 +50,10 @@ export class MainWindow {
       trafficLightPosition: { x: 12, y: 10 },
       show: false,
     });
+    if (windowState.isMaximized) {
+      this.window.maximize();
+    }
+    trackWindowState(this.window, windowStatePath);
 
     const preloadPath = path.join(__dirname, '..', '..', 'preload', 'index.js');
 
@@ -147,8 +159,8 @@ export class MainWindow {
       }
     });
 
-    // Create the first tab
-    this.tabManager.createTab();
+    // Restore the previous session's tabs, or start with a fresh tab.
+    this.tabManager.restoreSession();
   }
 
   private loadRenderer(): void {

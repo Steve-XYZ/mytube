@@ -424,6 +424,21 @@ function BrowserSettings({
           <option value="bing">Bing</option>
         </select>
       </div>
+
+      <div className="settings-row">
+        <div className="settings-label">
+          <span>Restore session</span>
+          <span className="settings-description">Reopen your tabs from the previous session on launch</span>
+        </div>
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={settings.browser.restoreSession}
+            onChange={(e) => onUpdate('browser.restoreSession', e.target.checked)}
+          />
+          <span className="settings-toggle-slider" />
+        </label>
+      </div>
     </div>
   );
 }

@@ -52,7 +52,7 @@ The project is in post-stabilization pre-release. The app shell, browser tab sys
 - YouTube can still reject anonymous guest sessions for specific videos/networks before formats are returned, even with PO-token support.
 - Packaging has not been verified end-to-end.
 - GitHub Actions PR CI covers tests, typecheck, lint, format, build, and the Playwright E2E smoke suite.
-- Playwright E2E covers launch, tabs, navigation, settings persistence, mocked download flows, the image gallery, and a packaged-build smoke (mock binaries); find-in-page and real-binary packaged validation are still missing.
+- Playwright E2E covers launch, tabs, navigation, settings persistence, session/window-state restore, mocked download flows, the image gallery, and a packaged-build smoke (mock binaries); find-in-page and real-binary packaged validation are still missing.
 - Persistence is JSON-backed for now, not SQLite.
 - Release signing/notarization configuration is in place; actual signing still requires external certificates and notarization credentials.
 
@@ -183,6 +183,8 @@ Current state:
 - Settings are stored in JSON.
 - Download state is stored in JSON.
 - Corrupt settings/download files are backed up.
+- All persisted JSON (settings, downloads, tab session, window bounds, yt-dlp updater state) is written atomically via temp file + rename.
+- Tab session (`session-state.json`) and window bounds (`window-state.json`) are restored on launch; restore can be disabled in Settings -> Browser.
 
 Options:
 

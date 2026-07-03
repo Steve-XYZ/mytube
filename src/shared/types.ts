@@ -166,5 +166,6 @@ export interface AppSettings {
   browser: {
     homepage: string;
     searchEngine: 'google' | 'duckduckgo' | 'bing';
+    restoreSession: boolean;
   };
 }

@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   browser: {
     homepage: 'mytube://newtab',
     searchEngine: 'google',
+    restoreSession: true,
   },
 };
 

@@ -14,6 +14,7 @@ Working areas:
 - Video/audio download wrapper around packaged `yt-dlp`, `ffmpeg`, and `ffprobe`.
 - YouTube public-mode extraction with optional local PO-token provider support.
 - Image scanning, batch download progress, and Finder reveal support.
+- Session restore (tabs reopen on launch; background tabs stay suspended until activated) and window size/position persistence.
 - JSON-backed settings and download history.
 - Unit tests for core main-process logic.
 
@@ -22,7 +23,7 @@ Known gaps:
 - `bin/` is generated locally and ignored by git; `pnpm run setup` must populate it before media download flows work on a fresh checkout.
 - Notarization and signed release publishing still require project credentials.
 - PR CI now covers tests, typecheck, lint, format, build, and the Playwright E2E smoke suite. Installer packaging is still handled separately by the tag/manual build workflow.
-- E2E coverage exists for launch, tabs, navigation, settings persistence, the download pipeline (with a mocked `yt-dlp`), the image gallery, and a packaged-build smoke with mock binaries. Find-in-page and real-binary packaged validation are not automated yet.
+- E2E coverage exists for launch, tabs, navigation, settings persistence, session/window-state restore, the download pipeline (with a mocked `yt-dlp`), the image gallery, and a packaged-build smoke with mock binaries. Find-in-page and real-binary packaged validation are not automated yet.
 - YouTube can still reject anonymous guest sessions for some videos/networks before downloadable formats are returned.
 - The PO-token provider is an external setup-time component and should be reviewed before production distribution.
 - Test code still uses a few casts around mocked Electron and Node APIs.
@@ -164,10 +165,13 @@ macOS with `iconutil` available. It creates `build/icon.icns`, a multiresolution
 
 ## Persistence
 
-Settings and download history are currently JSON-backed under Electron `userData`.
+Settings, download history, and browser session state are JSON-backed under
+Electron `userData`, written atomically (temp file + rename).
 
 - Settings: `settings.json`
 - Downloads: `downloads.json`
+- Tab session: `session-state.json` (disable via Settings -> Browser -> Restore session)
+- Window bounds: `window-state.json`
 
 The repository guidance mentions `electron-store` and SQLite as target architecture, but the current implementation intentionally uses simpler JSON persistence while the app is being stabilized.
 
