@@ -372,6 +372,23 @@ function DownloadSettings({
           onChange={(e) => onUpdate('downloads.speedLimitKbps', Math.max(0, parseInt(e.target.value, 10) || 0))}
         />
       </div>
+
+      <div className="settings-row">
+        <div className="settings-label">
+          <span>Keep yt-dlp updated</span>
+          <span className="settings-description">
+            Automatically download yt-dlp updates so video sites keep working
+          </span>
+        </div>
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={settings.downloads.autoUpdateYtDlp}
+            onChange={(e) => onUpdate('downloads.autoUpdateYtDlp', e.target.checked)}
+          />
+          <span className="settings-toggle-slider" />
+        </label>
+      </div>
     </div>
   );
 }

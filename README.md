@@ -191,6 +191,19 @@ parser treats Electron's Node mode like a normal Node.js process.
 
 YouTube currently enforces Proof-of-Origin tokens for some clients and traffic patterns. MyTube does not rely on Google login inside the Electron browser because Google can mark embedded browsers as untrusted. Instead, the main process calls `yt-dlp` in public mode first, skips exporting YouTube cookies by default, and uses the local PO-token provider when `pnpm run setup` has installed it.
 
+### Runtime yt-dlp updates
+
+Installed apps ship a `yt-dlp` snapshot, but YouTube changes routinely break
+older versions. The app therefore checks the official `yt-dlp/yt-dlp` GitHub
+releases shortly after launch and then daily, and downloads a newer binary
+into `userData/yt-dlp-updates/` when one exists. Downloads are verified against
+the release `SHA2-256SUMS` manifest and a `--version` probe before an atomic
+install; the app prefers the managed binary over the bundled one and falls
+back to the bundled snapshot if the managed one is broken. The packaged,
+code-signed bundle is never modified. Users can disable this with the
+"Keep yt-dlp updated" toggle in Settings -> Downloads. `MYTUBE_BIN_DIR`
+(used by tests) pins binary resolution and disables the updater.
+
 ## Platform Support
 
 The supported-platform matrix lives in [docs/supported-platforms.md](docs/supported-platforms.md). Keep product and marketing claims aligned with that file; MyTube should not be described as a universal downloader or as a tool for bypassing DRM, paid access, login walls, or rights holder restrictions.

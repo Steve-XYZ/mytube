@@ -19,6 +19,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     audioFormat: 'mp3',
     maxConcurrent: 3,
     speedLimitKbps: 0,
+    autoUpdateYtDlp: true,
   },
   browser: {
     homepage: 'mytube://newtab',

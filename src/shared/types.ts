@@ -161,6 +161,7 @@ export interface AppSettings {
     audioFormat: 'mp3' | 'm4a' | 'opus';
     maxConcurrent: number;
     speedLimitKbps: number;
+    autoUpdateYtDlp: boolean;
   };
   browser: {
     homepage: string;

@@ -382,12 +382,10 @@ Exit criteria:
 
 ## Immediate Next Actions
 
-1. Add a runtime yt-dlp updater so installed apps keep working when YouTube changes (build-time freshness is not enough for end users).
-2. Verify `pnpm run setup` on a clean macOS arm64 checkout and document any manual fallback.
-3. Verify `pnpm run setup` and installer packaging on Windows x64.
-4. Validate packaged app launch with `pnpm run pack`.
-5. Audit the PO-token provider and define the production packaging/security stance.
-6. Keep `docs/supported-platforms.md` aligned with URL classifier support and QA evidence.
+1. Verify `pnpm run setup` on a clean macOS arm64 checkout and document any manual fallback.
+2. Verify `pnpm run setup` and installer packaging on Windows x64.
+3. Audit the PO-token provider and define the production packaging/security stance.
+4. Keep `docs/supported-platforms.md` aligned with URL classifier support and QA evidence.
 
 ## Current Risk Register
 
@@ -396,6 +394,7 @@ Exit criteria:
 | External binary/provider downloads are unreliable | Blocks media setup on clean machines | Keep partial-download safety, add checksum validation, and document PATH/manual fallback |
 | External PO-token provider has its own dependency tree | Supply-chain/security risk for production builds | Pin commits, audit dependencies, and decide whether to bundle, install on setup, or make optional |
 | YouTube can reject anonymous guest sessions | Some public videos still cannot be extracted | Surface clear errors, avoid embedded Google login, and consider browser-captured signed media URLs as a future fallback |
+| Bundled yt-dlp goes stale on installed apps | YouTube changes break downloads weeks after release | Runtime updater checks GitHub releases daily and installs checksum-verified updates under `userData/yt-dlp-updates/` (toggle in Settings) |
 | Packaged binary resolution unverified | Downloads may work in dev but fail in release | Add packaged smoke test |
 | Packaged smoke uses mock media binaries | Real yt-dlp/ffmpeg behavior in packages is still unproven | Run `pnpm run test:e2e:packaged` after `pnpm run setup:bins` for release validation (download smoke auto-skips with real binaries) |
 | Live media sites change behavior | Tests can become flaky | Use mocked binaries for CI and live smoke tests only manually |

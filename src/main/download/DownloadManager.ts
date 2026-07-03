@@ -513,6 +513,15 @@ export class DownloadManager {
     };
   }
 
+  getYtDlpVersion(): string | null {
+    return this.ytdlp.getYtDlpVersion();
+  }
+
+  /** Re-resolve the yt-dlp binary after a runtime update lands. */
+  refreshYtDlpBinary(): void {
+    this.ytdlp.refreshYtDlpBinary();
+  }
+
   destroy(): void {
     this.ytdlp.cancelAll();
     this.saveState();

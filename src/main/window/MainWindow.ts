@@ -1,4 +1,4 @@
-import { BaseWindow, ipcMain, WebContentsView } from 'electron';
+import { app, BaseWindow, ipcMain, WebContentsView } from 'electron';
 import * as path from 'path';
 import {
   DEFAULT_WINDOW_WIDTH,
@@ -16,6 +16,7 @@ import { SettingsManager } from '../settings/SettingsManager';
 import { AutoUpdater } from '../updater/AutoUpdater';
 import { AppMenu } from './AppMenu';
 import { GoogleAuthManager } from '../auth/GoogleAuthManager';
+import { YtDlpUpdater, getManagedYtDlpDir } from '../download/YtDlpUpdater';
 
 export class MainWindow {
   private window: BaseWindow;
@@ -27,6 +28,7 @@ export class MainWindow {
   private settingsManager: SettingsManager;
   private googleAuthManager: GoogleAuthManager;
   private autoUpdater: AutoUpdater;
+  private ytdlpUpdater: YtDlpUpdater;
   private shellOverlayOpen = false;
 
   constructor() {
@@ -64,6 +66,28 @@ export class MainWindow {
     this.keyboardShortcuts = new KeyboardShortcuts(this.window, this.tabManager, this.appView);
     this.downloadManager = new DownloadManager(this.appView.webContents, this.settingsManager, this.tabManager);
     this.autoUpdater = new AutoUpdater(this.appView.webContents);
+
+    // Keep yt-dlp fresh on installed apps: YouTube changes routinely break
+    // older snapshots, so a runtime updater matters more than app releases.
+    // MYTUBE_BIN_DIR pins binaries for tests, so the updater stays off there.
+    this.ytdlpUpdater = new YtDlpUpdater({
+      managedDir: getManagedYtDlpDir(app.getPath('userData')),
+      currentVersionProvider: () => this.downloadManager.getYtDlpVersion(),
+      onUpdated: () => this.downloadManager.refreshYtDlpBinary(),
+    });
+    const ytdlpAutoUpdateEnabled = () =>
+      !process.env.MYTUBE_BIN_DIR && this.settingsManager.get('downloads.autoUpdateYtDlp') !== false;
+    if (ytdlpAutoUpdateEnabled()) {
+      this.ytdlpUpdater.start();
+    }
+    this.settingsManager.onSettingChanged((key) => {
+      if (key !== 'downloads.autoUpdateYtDlp') return;
+      if (ytdlpAutoUpdateEnabled()) {
+        this.ytdlpUpdater.start();
+      } else {
+        this.ytdlpUpdater.stop();
+      }
+    });
 
     // Set up native app menu
     new AppMenu(this.tabManager, this.appView);
@@ -167,6 +191,7 @@ export class MainWindow {
   }
 
   destroy(): void {
+    this.ytdlpUpdater.stop();
     this.keyboardShortcuts.destroy();
     this.downloadManager.destroy();
     this.mediaDetector.destroy();
