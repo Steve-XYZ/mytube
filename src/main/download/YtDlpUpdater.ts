@@ -2,6 +2,7 @@ import { spawnSync } from 'child_process';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { writeFileAtomic } from '../utils/fsAtomic';
 import log from 'electron-log/main';
 
 // Installed apps ship a yt-dlp snapshot, but YouTube changes frequently break
@@ -234,8 +235,7 @@ export class YtDlpUpdater {
 
   private writeState(state: UpdaterState): void {
     try {
-      fs.mkdirSync(this.managedDir, { recursive: true });
-      fs.writeFileSync(this.stateFilePath(), JSON.stringify(state, null, 2), 'utf-8');
+      writeFileAtomic(this.stateFilePath(), JSON.stringify(state, null, 2));
     } catch (err: unknown) {
       log.warn('Failed to persist yt-dlp updater state:', err instanceof Error ? err.message : String(err));
     }

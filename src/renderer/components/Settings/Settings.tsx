@@ -242,17 +242,9 @@ function GeneralSettings({
         </select>
       </div>
 
-      <div className="settings-row">
-        <div className="settings-label">
-          <span>Language</span>
-          <span className="settings-description">Interface language</span>
-        </div>
-        <select value={settings.general.language} onChange={(e) => onUpdate('general.language', e.target.value)}>
-          <option value="en">English</option>
-          <option value="es">Español</option>
-        </select>
-      </div>
-
+      {/* The language selector is intentionally absent: general.language stays
+          in the settings schema, but there is no i18n system yet, so showing a
+          selector that does nothing would mislead users. */}
       <div className="settings-row">
         <div className="settings-label">
           <span>Start on boot</span>
