@@ -439,6 +439,31 @@ function BrowserSettings({
           <span className="settings-toggle-slider" />
         </label>
       </div>
+
+      <SitePermissionsRow />
+    </div>
+  );
+}
+
+function SitePermissionsRow() {
+  const [cleared, setCleared] = useState(false);
+
+  const handleClear = useCallback(async () => {
+    await window.electronAPI.clearSitePermissions();
+    setCleared(true);
+  }, []);
+
+  return (
+    <div className="settings-row">
+      <div className="settings-label">
+        <span>Site permissions</span>
+        <span className="settings-description">
+          Forget every remembered camera, microphone, clipboard, and notification decision
+        </span>
+      </div>
+      <button className="settings-btn" onClick={handleClear} disabled={cleared}>
+        {cleared ? 'Cleared' : 'Clear all'}
+      </button>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { DownloadPanel } from './components/DownloadPanel/DownloadPanel';
 import { FormatSelector } from './components/FormatSelector/FormatSelector';
 import { ImageGallery } from './components/ImageGallery/ImageGallery';
 import { Settings } from './components/Settings/Settings';
+import { PermissionPrompt, type PermissionRequest } from './components/PermissionPrompt/PermissionPrompt';
 import { ToastContainer, useToasts } from './components/Toast/Toast';
 import { useTabs } from './hooks/useTabs';
 import type { DownloadItem, MediaDetectionState } from '../shared/types';
@@ -18,6 +19,7 @@ export default function App() {
   const [formatSelectorUrl, setFormatSelectorUrl] = useState<string | null>(null);
   const [imageGalleryVisible, setImageGalleryVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
+  const [permissionRequests, setPermissionRequests] = useState<PermissionRequest[]>([]);
   const urlInputRef = useRef<HTMLInputElement>(null);
 
   // Listen for keyboard shortcut events from main process
@@ -69,10 +71,28 @@ export default function App() {
     };
   }, []);
 
+  // Per-site permission prompts pushed from the main process.
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onPermissionRequest((request: PermissionRequest) => {
+      setPermissionRequests((prev) => (prev.some((item) => item.id === request.id) ? prev : [...prev, request]));
+    });
+    return unsubscribe;
+  }, []);
+
+  const handlePermissionResponse = useCallback((id: string, allow: boolean) => {
+    window.electronAPI.respondToPermission(id, allow);
+    setPermissionRequests((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
   const mediaState: MediaDetectionState = activeTab?.mediaState || 'none';
   const activeUrl = activeTab?.url || '';
   const shellOverlayOpen =
-    findVisible || downloadPanelVisible || Boolean(formatSelectorUrl) || imageGalleryVisible || settingsVisible;
+    findVisible ||
+    downloadPanelVisible ||
+    Boolean(formatSelectorUrl) ||
+    imageGalleryVisible ||
+    settingsVisible ||
+    permissionRequests.length > 0;
 
   useEffect(() => {
     window.electronAPI.setShellOverlayOpen(shellOverlayOpen);
@@ -167,6 +187,7 @@ export default function App() {
         onClose={() => setImageGalleryVisible(false)}
       />
       <Settings visible={settingsVisible} onClose={() => setSettingsVisible(false)} />
+      <PermissionPrompt requests={permissionRequests} onRespond={handlePermissionResponse} />
       <ToastContainer messages={toasts} onDismiss={dismissToast} />
     </>
   );

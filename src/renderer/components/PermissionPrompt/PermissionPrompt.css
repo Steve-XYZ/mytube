@@ -1,0 +1,57 @@
+.permission-prompt {
+  position: fixed;
+  top: 96px;
+  left: 16px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 420px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.15));
+  background: var(--bg-secondary, #fff);
+  color: var(--text-primary, #222);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+}
+
+.permission-prompt-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.permission-prompt-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.permission-prompt-btn {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.permission-prompt-allow {
+  background: var(--accent-color, #2563eb);
+  color: #fff;
+}
+
+.permission-prompt-allow:hover {
+  filter: brightness(1.1);
+}
+
+.permission-prompt-block {
+  background: transparent;
+  border-color: var(--border-color, rgba(0, 0, 0, 0.2));
+  color: inherit;
+}
+
+.permission-prompt-block:hover {
+  background: rgba(0, 0, 0, 0.06);
+}

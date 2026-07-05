@@ -18,6 +18,7 @@ import { AppMenu } from './AppMenu';
 import { GoogleAuthManager } from '../auth/GoogleAuthManager';
 import { YtDlpUpdater, getManagedYtDlpDir } from '../download/YtDlpUpdater';
 import { readWindowState, trackWindowState } from './WindowState';
+import { SitePermissionManager } from './SitePermissionManager';
 
 export class MainWindow {
   private window: BaseWindow;
@@ -30,6 +31,7 @@ export class MainWindow {
   private googleAuthManager: GoogleAuthManager;
   private autoUpdater: AutoUpdater;
   private ytdlpUpdater: YtDlpUpdater;
+  private sitePermissionManager: SitePermissionManager;
   private shellOverlayOpen = false;
 
   constructor() {
@@ -69,6 +71,13 @@ export class MainWindow {
 
     this.window.contentView.addChildView(this.appView);
     this.updateAppViewBounds();
+
+    // Per-site permission prompts must be registered before any tab exists.
+    this.sitePermissionManager = new SitePermissionManager({
+      storePath: path.join(app.getPath('userData'), 'site-permissions.json'),
+      shellSender: this.appView.webContents,
+      shellWebContentsId: this.appView.webContents.id,
+    });
 
     // Initialize managers
     this.settingsManager = new SettingsManager(this.appView.webContents);
@@ -204,6 +213,7 @@ export class MainWindow {
 
   destroy(): void {
     this.ytdlpUpdater.stop();
+    this.sitePermissionManager.destroy();
     this.keyboardShortcuts.destroy();
     this.downloadManager.destroy();
     this.mediaDetector.destroy();

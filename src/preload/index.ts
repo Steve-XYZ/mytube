@@ -41,6 +41,9 @@ const IPC_CHANNELS = {
   AUTH_GOOGLE_STATUS: 'auth:google-status',
   AUTH_GOOGLE_SIGN_IN: 'auth:google-sign-in',
   AUTH_GOOGLE_SIGN_OUT: 'auth:google-sign-out',
+  PERMISSION_REQUEST: 'permission:request',
+  PERMISSION_RESPOND: 'permission:respond',
+  PERMISSION_CLEAR_ALL: 'permission:clear-all',
   APP_GET_VERSION: 'app:get-version',
   APP_SELECT_DIRECTORY: 'app:select-directory',
   APP_SHELL_OVERLAY_SET: 'app:shell-overlay-set',
@@ -106,6 +109,10 @@ const electronAPI = {
   signInWithGoogle: () => ipcRenderer.invoke(IPC_CHANNELS.AUTH_GOOGLE_SIGN_IN),
   signOutGoogle: () => ipcRenderer.invoke(IPC_CHANNELS.AUTH_GOOGLE_SIGN_OUT),
 
+  // Site permissions
+  respondToPermission: (id: string, allow: boolean) => ipcRenderer.invoke(IPC_CHANNELS.PERMISSION_RESPOND, id, allow),
+  clearSitePermissions: () => ipcRenderer.invoke(IPC_CHANNELS.PERMISSION_CLEAR_ALL),
+
   // App
   getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION),
   selectDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.APP_SELECT_DIRECTORY),
@@ -161,6 +168,14 @@ const electronAPI = {
     ipcRenderer.on('media:batch-progress', handler);
     return () => {
       ipcRenderer.removeListener('media:batch-progress', handler);
+    };
+  },
+  onPermissionRequest: (callback: (request: { id: string; origin: string; permission: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, request: { id: string; origin: string; permission: string }) =>
+      callback(request);
+    ipcRenderer.on(IPC_CHANNELS.PERMISSION_REQUEST, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.PERMISSION_REQUEST, handler);
     };
   },
   onFindResult: (callback: (result: unknown) => void) => {

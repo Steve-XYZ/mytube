@@ -15,6 +15,7 @@ Working areas:
 - YouTube public-mode extraction with optional local PO-token provider support.
 - Image scanning, batch download progress, and Finder reveal support.
 - Session restore (tabs reopen on launch; background tabs stay suspended until activated) and window size/position persistence.
+- Per-site permission prompts: camera/microphone, clipboard read, and notifications ask once per origin and remember the answer (`site-permissions.json`); fullscreen/DRM stay auto-granted and everything else is denied. Decisions can be reset in Settings -> Browser.
 - JSON-backed settings and download history.
 - Unit tests for core main-process logic.
 

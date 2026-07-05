@@ -282,8 +282,8 @@ Tasks:
 - Provide Windows signing credentials through `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`.
 - Review entitlements.
 - Review Electron security checklist.
-- Validate no renderer Node access.
-- Validate permission handling for web contents.
+- Validate no renderer Node access. (covered by an E2E test)
+- Validate permission handling for web contents. (per-site permission prompts with remembered decisions replaced the old grant-to-all allowlist; covered by unit + E2E tests)
 - Keep `pnpm run release:check` passing before release builds.
 
 Acceptance:

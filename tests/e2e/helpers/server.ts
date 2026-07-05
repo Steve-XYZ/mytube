@@ -24,6 +24,24 @@ const PAGES: Record<string, string> = {
     <a id="to-a" href="/">Back to page A</a>
   </body>
 </html>`,
+  '/permissions': `<!doctype html>
+<html>
+  <head><title>E2E Permissions</title></head>
+  <body>
+    <h1 id="heading">Permissions</h1>
+    <p id="perm-state"></p>
+    <p id="result"></p>
+    <button id="req-notif">Request notifications</button>
+    <script>
+      document.getElementById('perm-state').textContent = Notification.permission;
+      document.getElementById('req-notif').addEventListener('click', () => {
+        Notification.requestPermission().then((outcome) => {
+          document.getElementById('result').textContent = outcome;
+        });
+      });
+    </script>
+  </body>
+</html>`,
   '/gallery': `<!doctype html>
 <html>
   <head><title>E2E Gallery</title></head>

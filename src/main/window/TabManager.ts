@@ -112,35 +112,11 @@ export class TabManager implements MediaFallbackProvider {
   }
 
   private setupPermissions(): void {
-    const ses = session.defaultSession;
-
-    // Set a standard Chrome user agent to avoid being blocked by sites like YouTube
+    // Set a standard Chrome user agent to avoid being blocked by sites like YouTube.
+    // Permission request/check handling lives in SitePermissionManager.
     const chromeVersion = process.versions.chrome;
     const userAgent = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
-    ses.setUserAgent(userAgent);
-
-    const allowedPermissions = [
-      'clipboard-read',
-      'clipboard-sanitized-write',
-      'fullscreen',
-      'mediaKeySystem', // DRM (Widevine) — required for YouTube
-      'media', // General media playback
-      'notifications',
-      'pointerLock',
-    ];
-
-    ses.setPermissionRequestHandler((_webContents, permission, callback) => {
-      const allowed = allowedPermissions.includes(permission);
-      if (!allowed) {
-        log.info(`Permission denied: ${permission}`);
-      }
-      callback(allowed);
-    });
-
-    // Some permissions are checked without a request (synchronous check)
-    ses.setPermissionCheckHandler((_webContents, permission) => {
-      return allowedPermissions.includes(permission);
-    });
+    session.defaultSession.setUserAgent(userAgent);
   }
 
   private setupMediaRequestCapture(): void {

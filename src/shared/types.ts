@@ -136,6 +136,11 @@ export const IPC_CHANNELS = {
   AUTH_GOOGLE_SIGN_OUT: 'auth:google-sign-out',
 
   // App
+  // Site permissions
+  PERMISSION_REQUEST: 'permission:request',
+  PERMISSION_RESPOND: 'permission:respond',
+  PERMISSION_CLEAR_ALL: 'permission:clear-all',
+
   APP_GET_VERSION: 'app:get-version',
   APP_SELECT_DIRECTORY: 'app:select-directory',
   APP_SHELL_OVERLAY_SET: 'app:shell-overlay-set',
