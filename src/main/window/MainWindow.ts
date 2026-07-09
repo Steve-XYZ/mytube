@@ -19,6 +19,8 @@ import { GoogleAuthManager } from '../auth/GoogleAuthManager';
 import { YtDlpUpdater, getManagedYtDlpDir } from '../download/YtDlpUpdater';
 import { readWindowState, trackWindowState } from './WindowState';
 import { SitePermissionManager } from './SitePermissionManager';
+import { HistoryManager } from '../history/HistoryManager';
+import { BookmarksManager } from '../bookmarks/BookmarksManager';
 
 export class MainWindow {
   private window: BaseWindow;
@@ -32,6 +34,8 @@ export class MainWindow {
   private autoUpdater: AutoUpdater;
   private ytdlpUpdater: YtDlpUpdater;
   private sitePermissionManager: SitePermissionManager;
+  private historyManager: HistoryManager;
+  private bookmarksManager: BookmarksManager;
   private shellOverlayOpen = false;
 
   constructor() {
@@ -83,7 +87,21 @@ export class MainWindow {
     this.settingsManager = new SettingsManager(this.appView.webContents);
     this.googleAuthManager = new GoogleAuthManager();
     this.mediaDetector = new MediaDetector(this.appView.webContents);
-    this.tabManager = new TabManager(this.window, this.appView, preloadPath, this.settingsManager, this.mediaDetector);
+    this.historyManager = new HistoryManager({
+      storePath: path.join(app.getPath('userData'), 'history.json'),
+    });
+    this.bookmarksManager = new BookmarksManager({
+      storePath: path.join(app.getPath('userData'), 'bookmarks.json'),
+      shellSender: this.appView.webContents,
+    });
+    this.tabManager = new TabManager(
+      this.window,
+      this.appView,
+      preloadPath,
+      this.settingsManager,
+      this.mediaDetector,
+      this.historyManager,
+    );
     this.keyboardShortcuts = new KeyboardShortcuts(this.window, this.tabManager, this.appView);
     this.downloadManager = new DownloadManager(this.appView.webContents, this.settingsManager, this.tabManager);
     this.autoUpdater = new AutoUpdater(this.appView.webContents);
@@ -214,6 +232,8 @@ export class MainWindow {
   destroy(): void {
     this.ytdlpUpdater.stop();
     this.sitePermissionManager.destroy();
+    this.historyManager.destroy();
+    this.bookmarksManager.destroy();
     this.keyboardShortcuts.destroy();
     this.downloadManager.destroy();
     this.mediaDetector.destroy();

@@ -32,6 +32,12 @@ interface MediaRequestDetails {
   requestHeaders?: Record<string, string | string[]>;
 }
 
+/** Receives main-frame navigations for the browsing history. */
+export interface VisitRecorder {
+  recordVisit(url: string, title: string): void;
+  updateVisitTitle(url: string, title: string): void;
+}
+
 interface SavedSessionTab {
   url: string;
   title: string;
@@ -59,6 +65,7 @@ export class TabManager implements MediaFallbackProvider {
   private sessionFilePath: string;
   private sessionSaveTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
+  private visitRecorder?: VisitRecorder;
 
   constructor(
     window: BaseWindow,
@@ -66,12 +73,14 @@ export class TabManager implements MediaFallbackProvider {
     preloadPath: string,
     settingsManager?: SettingsManager,
     mediaDetector?: MediaDetector,
+    visitRecorder?: VisitRecorder,
   ) {
     this.window = window;
     this.appView = appView;
     this.preloadPath = preloadPath;
     this.settingsManager = settingsManager;
     this.mediaDetector = mediaDetector;
+    this.visitRecorder = visitRecorder;
     this.ytdlp = new YtDlpController();
     this.sessionFilePath = path.join(app.getPath('userData'), 'session-state.json');
     this.setupIpcHandlers();
@@ -501,15 +510,18 @@ export class TabManager implements MediaFallbackProvider {
 
     wc.on('did-navigate', (_event, navUrl) => {
       this.updateNavState(managedTab, this.getDisplayUrlForLoadedUrl(navUrl));
+      this.visitRecorder?.recordVisit(info.url, info.title);
     });
 
     wc.on('did-navigate-in-page', (_event, navUrl) => {
       this.updateNavState(managedTab, this.getDisplayUrlForLoadedUrl(navUrl));
+      this.visitRecorder?.recordVisit(info.url, info.title);
     });
 
     wc.on('page-title-updated', (_event, title) => {
       info.title = title;
       this.notifyTabUpdate(info);
+      this.visitRecorder?.updateVisitTitle(info.url, title);
     });
 
     wc.on('page-favicon-updated', (_event, favicons) => {

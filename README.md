@@ -16,6 +16,7 @@ Working areas:
 - Image scanning, batch download progress, and Finder reveal support.
 - Session restore (tabs reopen on launch; background tabs stay suspended until activated) and window size/position persistence.
 - Per-site permission prompts: camera/microphone, clipboard read, and notifications ask once per origin and remember the answer (`site-permissions.json`); fullscreen/DRM stay auto-granted and everything else is denied. Decisions can be reset in Settings -> Browser.
+- Browsing history (recorded per navigation, searchable, capped at 2000 entries in `history.json`) and bookmarks (`bookmarks.json`), managed from the nav-bar star and the History & Bookmarks panel.
 - JSON-backed settings and download history.
 - Unit tests for core main-process logic.
 
@@ -173,6 +174,9 @@ Electron `userData`, written atomically (temp file + rename).
 - Downloads: `downloads.json`
 - Tab session: `session-state.json` (disable via Settings -> Browser -> Restore session)
 - Window bounds: `window-state.json`
+- Browsing history: `history.json`
+- Bookmarks: `bookmarks.json`
+- Site permissions: `site-permissions.json`
 
 The repository guidance mentions `electron-store` and SQLite as target architecture, but the current implementation intentionally uses simpler JSON persistence while the app is being stabilized.
 

@@ -6,6 +6,7 @@ import { DownloadPanel } from './components/DownloadPanel/DownloadPanel';
 import { FormatSelector } from './components/FormatSelector/FormatSelector';
 import { ImageGallery } from './components/ImageGallery/ImageGallery';
 import { Settings } from './components/Settings/Settings';
+import { HistoryPanel } from './components/HistoryPanel/HistoryPanel';
 import { PermissionPrompt, type PermissionRequest } from './components/PermissionPrompt/PermissionPrompt';
 import { ToastContainer, useToasts } from './components/Toast/Toast';
 import { useTabs } from './hooks/useTabs';
@@ -18,6 +19,7 @@ export default function App() {
   const [downloadPanelVisible, setDownloadPanelVisible] = useState(false);
   const [formatSelectorUrl, setFormatSelectorUrl] = useState<string | null>(null);
   const [imageGalleryVisible, setImageGalleryVisible] = useState(false);
+  const [historyPanelVisible, setHistoryPanelVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [permissionRequests, setPermissionRequests] = useState<PermissionRequest[]>([]);
   const urlInputRef = useRef<HTMLInputElement>(null);
@@ -91,6 +93,7 @@ export default function App() {
     downloadPanelVisible ||
     Boolean(formatSelectorUrl) ||
     imageGalleryVisible ||
+    historyPanelVisible ||
     settingsVisible ||
     permissionRequests.length > 0;
 
@@ -167,12 +170,14 @@ export default function App() {
         urlInputRef={urlInputRef}
         onDownloadClick={handleDownloadClick}
         onToggleDownloadPanel={handleToggleDownloadPanel}
+        onToggleHistoryPanel={() => setHistoryPanelVisible((prev) => !prev)}
         onImageGalleryClick={handleImageGalleryClick}
         onSettingsClick={handleSettingsClick}
         mediaState={mediaState}
       />
       <FindBar visible={findVisible} onClose={() => setFindVisible(false)} />
       <DownloadPanel visible={downloadPanelVisible} onClose={() => setDownloadPanelVisible(false)} />
+      <HistoryPanel visible={historyPanelVisible} onClose={() => setHistoryPanelVisible(false)} />
       {formatSelectorUrl && (
         <FormatSelector
           url={formatSelectorUrl}
