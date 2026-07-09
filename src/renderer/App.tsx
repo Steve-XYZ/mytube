@@ -6,6 +6,8 @@ import { DownloadPanel } from './components/DownloadPanel/DownloadPanel';
 import { FormatSelector } from './components/FormatSelector/FormatSelector';
 import { ImageGallery } from './components/ImageGallery/ImageGallery';
 import { Settings } from './components/Settings/Settings';
+import { HistoryPanel } from './components/HistoryPanel/HistoryPanel';
+import { PermissionPrompt, type PermissionRequest } from './components/PermissionPrompt/PermissionPrompt';
 import { ToastContainer, useToasts } from './components/Toast/Toast';
 import { useTabs } from './hooks/useTabs';
 import type { DownloadItem, MediaDetectionState } from '../shared/types';
@@ -17,7 +19,9 @@ export default function App() {
   const [downloadPanelVisible, setDownloadPanelVisible] = useState(false);
   const [formatSelectorUrl, setFormatSelectorUrl] = useState<string | null>(null);
   const [imageGalleryVisible, setImageGalleryVisible] = useState(false);
+  const [historyPanelVisible, setHistoryPanelVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
+  const [permissionRequests, setPermissionRequests] = useState<PermissionRequest[]>([]);
   const urlInputRef = useRef<HTMLInputElement>(null);
 
   // Listen for keyboard shortcut events from main process
@@ -69,10 +73,29 @@ export default function App() {
     };
   }, []);
 
+  // Per-site permission prompts pushed from the main process.
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onPermissionRequest((request: PermissionRequest) => {
+      setPermissionRequests((prev) => (prev.some((item) => item.id === request.id) ? prev : [...prev, request]));
+    });
+    return unsubscribe;
+  }, []);
+
+  const handlePermissionResponse = useCallback((id: string, allow: boolean) => {
+    window.electronAPI.respondToPermission(id, allow);
+    setPermissionRequests((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
   const mediaState: MediaDetectionState = activeTab?.mediaState || 'none';
   const activeUrl = activeTab?.url || '';
   const shellOverlayOpen =
-    findVisible || downloadPanelVisible || Boolean(formatSelectorUrl) || imageGalleryVisible || settingsVisible;
+    findVisible ||
+    downloadPanelVisible ||
+    Boolean(formatSelectorUrl) ||
+    imageGalleryVisible ||
+    historyPanelVisible ||
+    settingsVisible ||
+    permissionRequests.length > 0;
 
   useEffect(() => {
     window.electronAPI.setShellOverlayOpen(shellOverlayOpen);
@@ -147,12 +170,14 @@ export default function App() {
         urlInputRef={urlInputRef}
         onDownloadClick={handleDownloadClick}
         onToggleDownloadPanel={handleToggleDownloadPanel}
+        onToggleHistoryPanel={() => setHistoryPanelVisible((prev) => !prev)}
         onImageGalleryClick={handleImageGalleryClick}
         onSettingsClick={handleSettingsClick}
         mediaState={mediaState}
       />
       <FindBar visible={findVisible} onClose={() => setFindVisible(false)} />
       <DownloadPanel visible={downloadPanelVisible} onClose={() => setDownloadPanelVisible(false)} />
+      <HistoryPanel visible={historyPanelVisible} onClose={() => setHistoryPanelVisible(false)} />
       {formatSelectorUrl && (
         <FormatSelector
           url={formatSelectorUrl}
@@ -167,6 +192,7 @@ export default function App() {
         onClose={() => setImageGalleryVisible(false)}
       />
       <Settings visible={settingsVisible} onClose={() => setSettingsVisible(false)} />
+      <PermissionPrompt requests={permissionRequests} onRespond={handlePermissionResponse} />
       <ToastContainer messages={toasts} onDismiss={dismissToast} />
     </>
   );

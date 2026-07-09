@@ -14,6 +14,9 @@ Working areas:
 - Video/audio download wrapper around packaged `yt-dlp`, `ffmpeg`, and `ffprobe`.
 - YouTube public-mode extraction with optional local PO-token provider support.
 - Image scanning, batch download progress, and Finder reveal support.
+- Session restore (tabs reopen on launch; background tabs stay suspended until activated) and window size/position persistence.
+- Per-site permission prompts: camera/microphone, clipboard read, and notifications ask once per origin and remember the answer (`site-permissions.json`); fullscreen/DRM stay auto-granted and everything else is denied. Decisions can be reset in Settings -> Browser.
+- Browsing history (recorded per navigation, searchable, capped at 2000 entries in `history.json`) and bookmarks (`bookmarks.json`), managed from the nav-bar star and the History & Bookmarks panel.
 - JSON-backed settings and download history.
 - Unit tests for core main-process logic.
 
@@ -21,8 +24,8 @@ Known gaps:
 
 - `bin/` is generated locally and ignored by git; `pnpm run setup` must populate it before media download flows work on a fresh checkout.
 - Notarization and signed release publishing still require project credentials.
-- PR CI now covers tests, typecheck, lint, format, and build. Installer packaging is still handled separately by the tag/manual build workflow.
-- There is no automated E2E coverage yet.
+- PR CI now covers tests, typecheck, lint, format, build, and the Playwright E2E smoke suite. Installer packaging is still handled separately by the tag/manual build workflow.
+- E2E coverage exists for launch, tabs, navigation, settings persistence, session/window-state restore, the download pipeline (with a mocked `yt-dlp`), the image gallery, and a packaged-build smoke with mock binaries. Find-in-page and real-binary packaged validation are not automated yet.
 - YouTube can still reject anonymous guest sessions for some videos/networks before downloadable formats are returned.
 - The PO-token provider is an external setup-time component and should be reviewed before production distribution.
 - Test code still uses a few casts around mocked Electron and Node APIs.
@@ -104,12 +107,31 @@ pnpm run build:all
 pnpm run dev:electron
 ```
 
-Run the Electron smoke test when changing launch, packaging, shell, or browser
-window behavior:
+Run the Playwright E2E suite when changing launch, shell, tab, navigation,
+settings, or download behavior:
 
 ```bash
 pnpm run test:e2e
 ```
+
+The E2E suite launches the built app with isolated state (`MYTUBE_USER_DATA_DIR`
+pointing at a temp directory, which also redirects the system downloads path)
+and a deterministic mock `yt-dlp` (`MYTUBE_BIN_DIR` pointing at
+`tests/e2e/fixtures/bin`), so it never depends on the live network or real
+media binaries. Navigation and image gallery tests run against a local HTTP
+server started by the tests themselves.
+
+Run the packaged-build smoke when changing packaging, binary resolution, or
+launch behavior:
+
+```bash
+pnpm run test:e2e:packaged
+```
+
+It stages mock media binaries into `bin/<os>/<arch>/` (unless real ones are
+already staged), packs with `electron-builder --dir`, launches the packaged
+executable, and verifies the shell plus a download resolved from the package's
+`resources/bin`. With real staged binaries the download smoke auto-skips.
 
 Package locally:
 
@@ -145,10 +167,16 @@ macOS with `iconutil` available. It creates `build/icon.icns`, a multiresolution
 
 ## Persistence
 
-Settings and download history are currently JSON-backed under Electron `userData`.
+Settings, download history, and browser session state are JSON-backed under
+Electron `userData`, written atomically (temp file + rename).
 
 - Settings: `settings.json`
 - Downloads: `downloads.json`
+- Tab session: `session-state.json` (disable via Settings -> Browser -> Restore session)
+- Window bounds: `window-state.json`
+- Browsing history: `history.json`
+- Bookmarks: `bookmarks.json`
+- Site permissions: `site-permissions.json`
 
 The repository guidance mentions `electron-store` and SQLite as target architecture, but the current implementation intentionally uses simpler JSON persistence while the app is being stabilized.
 
@@ -171,6 +199,19 @@ a narrow compatibility patch to the generated provider entry point so its CLI
 parser treats Electron's Node mode like a normal Node.js process.
 
 YouTube currently enforces Proof-of-Origin tokens for some clients and traffic patterns. MyTube does not rely on Google login inside the Electron browser because Google can mark embedded browsers as untrusted. Instead, the main process calls `yt-dlp` in public mode first, skips exporting YouTube cookies by default, and uses the local PO-token provider when `pnpm run setup` has installed it.
+
+### Runtime yt-dlp updates
+
+Installed apps ship a `yt-dlp` snapshot, but YouTube changes routinely break
+older versions. The app therefore checks the official `yt-dlp/yt-dlp` GitHub
+releases shortly after launch and then daily, and downloads a newer binary
+into `userData/yt-dlp-updates/` when one exists. Downloads are verified against
+the release `SHA2-256SUMS` manifest and a `--version` probe before an atomic
+install; the app prefers the managed binary over the bundled one and falls
+back to the bundled snapshot if the managed one is broken. The packaged,
+code-signed bundle is never modified. Users can disable this with the
+"Keep yt-dlp updated" toggle in Settings -> Downloads. `MYTUBE_BIN_DIR`
+(used by tests) pins binary resolution and disables the updater.
 
 ## Platform Support
 

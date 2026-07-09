@@ -136,6 +136,21 @@ export const IPC_CHANNELS = {
   AUTH_GOOGLE_SIGN_OUT: 'auth:google-sign-out',
 
   // App
+  // Site permissions
+  PERMISSION_REQUEST: 'permission:request',
+  PERMISSION_RESPOND: 'permission:respond',
+  PERMISSION_CLEAR_ALL: 'permission:clear-all',
+
+  // History & bookmarks
+  HISTORY_LIST: 'history:list',
+  HISTORY_DELETE: 'history:delete',
+  HISTORY_CLEAR: 'history:clear',
+  BOOKMARK_TOGGLE: 'bookmark:toggle',
+  BOOKMARK_LIST: 'bookmark:list',
+  BOOKMARK_REMOVE: 'bookmark:remove',
+  BOOKMARK_STATUS: 'bookmark:status',
+  BOOKMARK_CHANGED: 'bookmark:changed',
+
   APP_GET_VERSION: 'app:get-version',
   APP_SELECT_DIRECTORY: 'app:select-directory',
   APP_SHELL_OVERLAY_SET: 'app:shell-overlay-set',
@@ -145,6 +160,21 @@ export const IPC_CHANNELS = {
 export interface FindInPageResult {
   activeMatchOrdinal: number;
   matches: number;
+}
+
+// ===== History & Bookmarks =====
+export interface HistoryEntry {
+  id: string;
+  url: string;
+  title: string;
+  visitedAt: number;
+}
+
+export interface Bookmark {
+  id: string;
+  url: string;
+  title: string;
+  createdAt: number;
 }
 
 // ===== Settings Types =====
@@ -161,9 +191,11 @@ export interface AppSettings {
     audioFormat: 'mp3' | 'm4a' | 'opus';
     maxConcurrent: number;
     speedLimitKbps: number;
+    autoUpdateYtDlp: boolean;
   };
   browser: {
     homepage: string;
     searchEngine: 'google' | 'duckduckgo' | 'bing';
+    restoreSession: boolean;
   };
 }

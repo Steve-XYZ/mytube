@@ -2,6 +2,7 @@ import { app, ipcMain, nativeTheme, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { IPC_CHANNELS, AppSettings } from '../../shared/types';
+import { writeFileAtomic } from '../utils/fsAtomic';
 import log from 'electron-log/main';
 
 type WebContentsSender = { send: (channel: string, ...args: unknown[]) => void };
@@ -19,10 +20,12 @@ const DEFAULT_SETTINGS: AppSettings = {
     audioFormat: 'mp3',
     maxConcurrent: 3,
     speedLimitKbps: 0,
+    autoUpdateYtDlp: true,
   },
   browser: {
     homepage: 'mytube://newtab',
     searchEngine: 'google',
+    restoreSession: true,
   },
 };
 
@@ -73,11 +76,7 @@ export class SettingsManager {
 
   private saveSettings(): void {
     try {
-      const dir = path.dirname(this.filePath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      fs.writeFileSync(this.filePath, JSON.stringify(this.settings, null, 2), 'utf-8');
+      writeFileAtomic(this.filePath, JSON.stringify(this.settings, null, 2));
     } catch (err: unknown) {
       if (getErrorCode(err) === 'ENOSPC') {
         log.error('Disk full — cannot save settings');

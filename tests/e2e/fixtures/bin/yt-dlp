@@ -1,0 +1,117 @@
+#!/usr/bin/env node
+'use strict';
+
+// Mock yt-dlp used by the Playwright E2E suite (via MYTUBE_BIN_DIR).
+// It emulates the yt-dlp CLI surface the app depends on without touching
+// the network: --version, --dump-json metadata, and download mode with
+// progress lines plus a real output file.
+//
+// URLs containing "mock-fail" simulate an extraction failure.
+
+const fs = require('fs');
+const path = require('path');
+
+const args = process.argv.slice(2);
+const has = (flag) => args.includes(flag);
+const valueOf = (flag) => {
+  const index = args.indexOf(flag);
+  return index >= 0 && index + 1 < args.length ? args[index + 1] : undefined;
+};
+
+const url = [...args].reverse().find((arg) => /^https?:\/\//i.test(arg)) || '';
+
+function resolveVideoId(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    const fromQuery = parsed.searchParams.get('v');
+    if (fromQuery) return fromQuery;
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    return segments[segments.length - 1] || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+const videoId = resolveVideoId(url);
+const title = `Mock Video ${videoId}`;
+
+if (has('--version')) {
+  process.stdout.write('2026.06.09-mytube-e2e-mock\n');
+  process.exit(0);
+}
+
+if (url.includes('mock-fail')) {
+  process.stderr.write(`ERROR: [youtube] ${videoId}: Simulated extraction failure for E2E tests\n`);
+  process.exit(1);
+}
+
+if (has('--dump-json')) {
+  const info = {
+    id: videoId,
+    title,
+    description: 'Deterministic metadata emitted by the E2E mock yt-dlp binary.',
+    thumbnail: 'https://example.invalid/thumb.jpg',
+    duration: 123,
+    uploader: 'MyTube E2E',
+    formats: [
+      {
+        format_id: '140',
+        ext: 'm4a',
+        resolution: 'audio only',
+        vcodec: 'none',
+        acodec: 'mp4a.40.2',
+        filesize: 2_000_000,
+      },
+      {
+        format_id: '22',
+        ext: 'mp4',
+        width: 1280,
+        height: 720,
+        fps: 30,
+        vcodec: 'avc1.64001F',
+        acodec: 'mp4a.40.2',
+        filesize: 10_000_000,
+      },
+      {
+        format_id: '137',
+        ext: 'mp4',
+        width: 1920,
+        height: 1080,
+        fps: 30,
+        vcodec: 'avc1.640028',
+        acodec: 'none',
+        filesize: 25_000_000,
+      },
+    ],
+  };
+  process.stdout.write(`${JSON.stringify(info)}\n`);
+  process.exit(0);
+}
+
+// Download mode.
+const template = valueOf('-o');
+if (!template) {
+  process.stderr.write('ERROR: mock yt-dlp expected an -o output template\n');
+  process.exit(2);
+}
+
+const audioOnly = has('-x');
+const ext = audioOnly ? valueOf('--audio-format') || 'mp3' : valueOf('--merge-output-format') || 'mp4';
+const outputPath = template.replace('%(title)s', title).replace('%(id)s', videoId).replace('%(ext)s', ext);
+
+const emit = (line) => process.stdout.write(`${line}\n`);
+const steps = [
+  () => emit(`[download] Destination: ${outputPath}`),
+  () => emit('[download]  25.0% of  10.00MiB at    4.00MiB/s ETA 00:02'),
+  () => emit('[download]  60.0% of  10.00MiB at    4.00MiB/s ETA 00:01'),
+  () => emit('[download] 100% of  10.00MiB in 00:02'),
+  () => {
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, `mock media downloaded from ${url}\n`);
+    process.exit(0);
+  },
+];
+
+steps.forEach((step, index) => {
+  setTimeout(step, 80 * (index + 1));
+});

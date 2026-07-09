@@ -41,6 +41,17 @@ const IPC_CHANNELS = {
   AUTH_GOOGLE_STATUS: 'auth:google-status',
   AUTH_GOOGLE_SIGN_IN: 'auth:google-sign-in',
   AUTH_GOOGLE_SIGN_OUT: 'auth:google-sign-out',
+  PERMISSION_REQUEST: 'permission:request',
+  PERMISSION_RESPOND: 'permission:respond',
+  PERMISSION_CLEAR_ALL: 'permission:clear-all',
+  HISTORY_LIST: 'history:list',
+  HISTORY_DELETE: 'history:delete',
+  HISTORY_CLEAR: 'history:clear',
+  BOOKMARK_TOGGLE: 'bookmark:toggle',
+  BOOKMARK_LIST: 'bookmark:list',
+  BOOKMARK_REMOVE: 'bookmark:remove',
+  BOOKMARK_STATUS: 'bookmark:status',
+  BOOKMARK_CHANGED: 'bookmark:changed',
   APP_GET_VERSION: 'app:get-version',
   APP_SELECT_DIRECTORY: 'app:select-directory',
   APP_SHELL_OVERLAY_SET: 'app:shell-overlay-set',
@@ -106,6 +117,19 @@ const electronAPI = {
   signInWithGoogle: () => ipcRenderer.invoke(IPC_CHANNELS.AUTH_GOOGLE_SIGN_IN),
   signOutGoogle: () => ipcRenderer.invoke(IPC_CHANNELS.AUTH_GOOGLE_SIGN_OUT),
 
+  // Site permissions
+  respondToPermission: (id: string, allow: boolean) => ipcRenderer.invoke(IPC_CHANNELS.PERMISSION_RESPOND, id, allow),
+  clearSitePermissions: () => ipcRenderer.invoke(IPC_CHANNELS.PERMISSION_CLEAR_ALL),
+
+  // History & bookmarks
+  getHistory: (query?: { search?: string; limit?: number }) => ipcRenderer.invoke(IPC_CHANNELS.HISTORY_LIST, query),
+  deleteHistoryEntry: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.HISTORY_DELETE, id),
+  clearHistory: () => ipcRenderer.invoke(IPC_CHANNELS.HISTORY_CLEAR),
+  toggleBookmark: (url: string, title?: string) => ipcRenderer.invoke(IPC_CHANNELS.BOOKMARK_TOGGLE, url, title),
+  listBookmarks: () => ipcRenderer.invoke(IPC_CHANNELS.BOOKMARK_LIST),
+  removeBookmark: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.BOOKMARK_REMOVE, id),
+  isBookmarked: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.BOOKMARK_STATUS, url),
+
   // App
   getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION),
   selectDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.APP_SELECT_DIRECTORY),
@@ -161,6 +185,21 @@ const electronAPI = {
     ipcRenderer.on('media:batch-progress', handler);
     return () => {
       ipcRenderer.removeListener('media:batch-progress', handler);
+    };
+  },
+  onBookmarksChanged: (callback: (bookmarks: unknown[]) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, bookmarks: unknown[]) => callback(bookmarks);
+    ipcRenderer.on(IPC_CHANNELS.BOOKMARK_CHANGED, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.BOOKMARK_CHANGED, handler);
+    };
+  },
+  onPermissionRequest: (callback: (request: { id: string; origin: string; permission: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, request: { id: string; origin: string; permission: string }) =>
+      callback(request);
+    ipcRenderer.on(IPC_CHANNELS.PERMISSION_REQUEST, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.PERMISSION_REQUEST, handler);
     };
   },
   onFindResult: (callback: (result: unknown) => void) => {

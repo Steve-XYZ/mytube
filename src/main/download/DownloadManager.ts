@@ -6,6 +6,7 @@ import { DownloadItem, IPC_CHANNELS } from '../../shared/types';
 import { YtDlpController, DownloadOptions, DownloadProgress } from './YtDlpController';
 import type { CapturedMediaFallback, MediaFallbackProvider } from './MediaFallbackProvider';
 import type { SettingsManager } from '../settings/SettingsManager';
+import { writeFileAtomic } from '../utils/fsAtomic';
 import log from 'electron-log/main';
 
 type WebContentsSender = { send: (channel: string, ...args: unknown[]) => void };
@@ -416,13 +417,7 @@ export class DownloadManager {
   private saveState(): void {
     try {
       const items = Array.from(this.downloads.values()).map((d) => ({ ...d, speed: undefined, eta: undefined }));
-      const dir = path.dirname(this.stateFilePath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      const tmpPath = `${this.stateFilePath}.tmp`;
-      fs.writeFileSync(tmpPath, JSON.stringify(items, null, 2));
-      fs.renameSync(tmpPath, this.stateFilePath);
+      writeFileAtomic(this.stateFilePath, JSON.stringify(items, null, 2));
     } catch (err: unknown) {
       if (getErrorCode(err) === 'ENOSPC') {
         log.error('Disk full — cannot save download state');
@@ -511,6 +506,15 @@ export class DownloadManager {
       url,
       formats: [],
     };
+  }
+
+  getYtDlpVersion(): string | null {
+    return this.ytdlp.getYtDlpVersion();
+  }
+
+  /** Re-resolve the yt-dlp binary after a runtime update lands. */
+  refreshYtDlpBinary(): void {
+    this.ytdlp.refreshYtDlpBinary();
   }
 
   destroy(): void {

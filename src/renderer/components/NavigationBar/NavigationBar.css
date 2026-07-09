@@ -96,6 +96,15 @@
   color: var(--text-secondary);
 }
 
+.nav-btn-star-active {
+  color: #f5a623;
+}
+
+.nav-btn-star-active:hover {
+  color: #f5a623;
+  filter: brightness(1.1);
+}
+
 .nav-btn-download-active {
   color: var(--accent-color);
   background: var(--accent-color-alpha);

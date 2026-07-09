@@ -51,8 +51,8 @@ The project is in post-stabilization pre-release. The app shell, browser tab sys
 - The PO-token provider is an external component pinned to `bgutil-ytdlp-pot-provider` `1.3.1` commit `7608dd51ee813b48cf9a6d68c6e42cb197ce10e0`; its dependency tree needs production security review.
 - YouTube can still reject anonymous guest sessions for specific videos/networks before formats are returned, even with PO-token support.
 - Packaging has not been verified end-to-end.
-- GitHub Actions PR CI covers tests, typecheck, lint, format, and build.
-- No E2E coverage exists for browser navigation, tabs, download flows, or packaging smoke tests.
+- GitHub Actions PR CI covers tests, typecheck, lint, format, build, and the Playwright E2E smoke suite.
+- Playwright E2E covers launch, tabs, navigation, settings persistence, session/window-state restore, mocked download flows, the image gallery, and a packaged-build smoke (mock binaries); find-in-page and real-binary packaged validation are still missing.
 - Persistence is JSON-backed for now, not SQLite.
 - Release signing/notarization configuration is in place; actual signing still requires external certificates and notarization credentials.
 
@@ -183,6 +183,8 @@ Current state:
 - Settings are stored in JSON.
 - Download state is stored in JSON.
 - Corrupt settings/download files are backed up.
+- All persisted JSON (settings, downloads, tab session, window bounds, yt-dlp updater state) is written atomically via temp file + rename.
+- Tab session (`session-state.json`) and window bounds (`window-state.json`) are restored on launch; restore can be disabled in Settings -> Browser.
 
 Options:
 
@@ -229,18 +231,22 @@ Goal: cover behavior that unit tests cannot prove.
 
 Tasks:
 
-- Choose Playwright-based Electron test approach.
-- Add app launch test.
-- Add navigation/tab test.
-- Add settings modal test.
-- Add image gallery smoke test.
-- Add download flow smoke test with mocked `yt-dlp`/`ffmpeg` binaries.
-- Add production build launch smoke test.
+- Choose Playwright-based Electron test approach. (done — `_electron.launch` against the built app; every `WebContentsView` is visible as a Playwright `Page`)
+- Add app launch test. (done — includes renderer shell render and no-Node-APIs security check)
+- Add navigation/tab test. (done — local HTTP server, URL bar, back/forward, tab create/switch/close)
+- Add settings modal test. (done — theme change applies live and persists across an app restart)
+- Add image gallery smoke test. (done — locally served PNGs, tiny-image filtering, batch download to the isolated downloads dir, empty state)
+- Add download flow smoke test with mocked `yt-dlp`/`ffmpeg` binaries. (done — mock binary via `MYTUBE_BIN_DIR`; covers metadata, video, audio-only, and failure surfacing)
+- Add production build launch smoke test. (done — `pnpm run test:e2e:packaged` stages mock binaries, packs with `electron-builder --dir`, launches the packaged executable, and completes a download resolved from `resources/bin`)
+
+Test-support hooks: `MYTUBE_USER_DATA_DIR` isolates persisted state (including the system downloads path) per test run, and `MYTUBE_BIN_DIR` redirects media binary resolution to `tests/e2e/fixtures/bin`.
 
 Acceptance:
 
 - Main app workflows are tested without relying on live YouTube/network behavior.
 - CI can run a meaningful smoke suite.
+
+Status: complete. 16 tests run in PR CI under xvfb: 13 dev-mode plus a packaged-build job that verifies launch and packaged binary resolution.
 
 ### 8. Packaging and Distribution
 
@@ -253,8 +259,8 @@ Tasks:
 - Verify `pnpm run dist:win` on Windows.
 - Ensure `extraResources` includes binaries correctly.
 - Ensure `build/icon.ico` exists for Windows or update config.
-- Verify app starts from packaged build.
-- Verify binary resolution in packaged build.
+- Verify app starts from packaged build. (automated for `--dir` packs: `pnpm run test:e2e:packaged`, verified on macOS arm64 and Linux x64 CI)
+- Verify binary resolution in packaged build. (automated with mock binaries — the packaged smoke completes a download resolved from `resources/bin`; real-binary validation still manual)
 - Verify auto-updater behavior or disable until configured.
 - Define release channel strategy.
 
@@ -276,8 +282,8 @@ Tasks:
 - Provide Windows signing credentials through `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`.
 - Review entitlements.
 - Review Electron security checklist.
-- Validate no renderer Node access.
-- Validate permission handling for web contents.
+- Validate no renderer Node access. (covered by an E2E test)
+- Validate permission handling for web contents. (per-site permission prompts with remembered decisions replaced the old grant-to-all allowlist; covered by unit + E2E tests)
 - Keep `pnpm run release:check` passing before release builds.
 
 Acceptance:
@@ -350,6 +356,8 @@ Exit criteria:
 
 - CI or local E2E can prove app launch, tabs, navigation, and a download flow.
 
+Status: complete. PR CI runs the Playwright suite covering launch, tabs, navigation, settings, and mocked download flows.
+
 ### Milestone 4: Packaging
 
 Scope:
@@ -376,12 +384,10 @@ Exit criteria:
 
 ## Immediate Next Actions
 
-1. Expand Electron E2E beyond launch to navigation, tabs, and one mocked download flow.
-2. Verify `pnpm run setup` on a clean macOS arm64 checkout and document any manual fallback.
-3. Verify `pnpm run setup` and installer packaging on Windows x64.
-4. Validate packaged app launch with `pnpm run pack`.
-5. Audit the PO-token provider and define the production packaging/security stance.
-6. Keep `docs/supported-platforms.md` aligned with URL classifier support and QA evidence.
+1. Verify `pnpm run setup` on a clean macOS arm64 checkout and document any manual fallback.
+2. Verify `pnpm run setup` and installer packaging on Windows x64.
+3. Audit the PO-token provider and define the production packaging/security stance.
+4. Keep `docs/supported-platforms.md` aligned with URL classifier support and QA evidence.
 
 ## Current Risk Register
 
@@ -390,8 +396,9 @@ Exit criteria:
 | External binary/provider downloads are unreliable | Blocks media setup on clean machines | Keep partial-download safety, add checksum validation, and document PATH/manual fallback |
 | External PO-token provider has its own dependency tree | Supply-chain/security risk for production builds | Pin commits, audit dependencies, and decide whether to bundle, install on setup, or make optional |
 | YouTube can reject anonymous guest sessions | Some public videos still cannot be extracted | Surface clear errors, avoid embedded Google login, and consider browser-captured signed media URLs as a future fallback |
+| Bundled yt-dlp goes stale on installed apps | YouTube changes break downloads weeks after release | Runtime updater checks GitHub releases daily and installs checksum-verified updates under `userData/yt-dlp-updates/` (toggle in Settings) |
 | Packaged binary resolution unverified | Downloads may work in dev but fail in release | Add packaged smoke test |
-| CI only covers static/unit/build gates | Browser behavior can still regress | Expand Electron E2E beyond launch smoke |
+| Packaged smoke uses mock media binaries | Real yt-dlp/ffmpeg behavior in packages is still unproven | Run `pnpm run test:e2e:packaged` after `pnpm run setup:bins` for release validation (download smoke auto-skips with real binaries) |
 | Live media sites change behavior | Tests can become flaky | Use mocked binaries for CI and live smoke tests only manually |
 | JSON persistence may not scale | Download queue could become brittle | Decide JSON vs SQLite before heavy queue features |
 | Signing/notarization credentials are external | Public release requires private credentials | Keep hooks configured and fail strict checks with `MYTUBE_REQUIRE_SIGNING=1` |

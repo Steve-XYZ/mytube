@@ -6,6 +6,7 @@ import { app, session, type Cookie } from 'electron';
 import { VideoInfo, VideoFormat } from '../../shared/types';
 import log from 'electron-log/main';
 import { classifyMediaUrl } from './MediaUrlClassifier';
+import { getManagedYtDlpDir, getManagedYtDlpPath } from './YtDlpUpdater';
 
 export interface DownloadOptions {
   formatId?: string;
@@ -97,13 +98,7 @@ export class YtDlpController {
     this.nodeRuntimePath = this.resolveNodeRuntimePath();
     this.potProviderServerHome = this.resolvePotProviderServerHome();
 
-    // Verify binaries exist at startup
-    this.binariesAvailable = fs.existsSync(this.ytdlpPath);
-    if (!this.binariesAvailable) {
-      log.error(`yt-dlp binary not found at: ${this.ytdlpPath}`);
-    } else {
-      this.ytdlpVersion = this.detectYtDlpVersion();
-    }
+    this.initializeYtDlpBinary();
     if (!fs.existsSync(path.join(this.ffmpegPath, `ffmpeg${process.platform === 'win32' ? '.exe' : ''}`))) {
       log.warn(`ffmpeg binary not found in: ${this.ffmpegPath}`);
     }
@@ -121,6 +116,49 @@ export class YtDlpController {
     }
   }
 
+  /**
+   * Prefer a runtime-updated yt-dlp from the managed updates directory over
+   * the bundled snapshot, falling back to the bundled binary when the managed
+   * one is missing or broken. MYTUBE_BIN_DIR pins the binary for tests.
+   */
+  private initializeYtDlpBinary(): void {
+    const bundledPath = this.resolveBinaryPath('yt-dlp');
+    this.ytdlpPath = bundledPath;
+    this.binariesAvailable = fs.existsSync(bundledPath);
+
+    if (!process.env.MYTUBE_BIN_DIR) {
+      const managedPath = getManagedYtDlpPath(getManagedYtDlpDir(app.getPath('userData')));
+      if (fs.existsSync(managedPath)) {
+        YtDlpController.ytdlpVersionCache.delete(managedPath);
+        const managedVersion = this.detectYtDlpVersion(managedPath);
+        if (managedVersion) {
+          this.ytdlpPath = managedPath;
+          this.binariesAvailable = true;
+          this.ytdlpVersion = managedVersion;
+          return;
+        }
+        log.warn(`Managed yt-dlp update at ${managedPath} failed version probe; using bundled binary`);
+      }
+    }
+
+    if (!this.binariesAvailable) {
+      log.error(`yt-dlp binary not found at: ${bundledPath}`);
+      this.ytdlpVersion = null;
+      return;
+    }
+    this.ytdlpVersion = this.detectYtDlpVersion(bundledPath);
+  }
+
+  /** Re-resolve the yt-dlp binary (called after a runtime update lands). */
+  refreshYtDlpBinary(): void {
+    this.initializeYtDlpBinary();
+    log.info(`yt-dlp binary refreshed: ${this.ytdlpPath} (version: ${this.ytdlpVersion ?? 'unknown'})`);
+  }
+
+  getYtDlpVersion(): string | null {
+    return this.ytdlpVersion;
+  }
+
   /** Check if yt-dlp binary is available */
   isBinaryAvailable(): boolean {
     return this.binariesAvailable;
@@ -132,6 +170,11 @@ export class YtDlpController {
   }
 
   private resolveBinaryDir(): string {
+    // Test support: point the app at stub/local media binaries.
+    if (process.env.MYTUBE_BIN_DIR) {
+      return process.env.MYTUBE_BIN_DIR;
+    }
+
     // In production every platform/arch binary is flattened into resources/bin/.
     if (app.isPackaged) {
       return path.join(process.resourcesPath, 'bin');
@@ -147,6 +190,9 @@ export class YtDlpController {
    * plugins) live in resources/bin/ when packaged and under bin/shared/ in dev.
    */
   private resolveSharedResourceDir(): string {
+    if (process.env.MYTUBE_BIN_DIR) {
+      return process.env.MYTUBE_BIN_DIR;
+    }
     if (app.isPackaged) {
       return path.join(process.resourcesPath, 'bin');
     }
@@ -183,12 +229,12 @@ export class YtDlpController {
     return null;
   }
 
-  private detectYtDlpVersion(): string | null {
-    if (YtDlpController.ytdlpVersionCache.has(this.ytdlpPath)) {
-      return YtDlpController.ytdlpVersionCache.get(this.ytdlpPath) || null;
+  private detectYtDlpVersion(binaryPath: string): string | null {
+    if (YtDlpController.ytdlpVersionCache.has(binaryPath)) {
+      return YtDlpController.ytdlpVersionCache.get(binaryPath) || null;
     }
 
-    const result = spawnSync(this.ytdlpPath, ['--version'], {
+    const result = spawnSync(binaryPath, ['--version'], {
       encoding: 'utf8',
       timeout: 2000,
       env: this.getYtDlpEnvironment(),
@@ -196,12 +242,12 @@ export class YtDlpController {
 
     if (result.error || result.status !== 0) {
       log.warn('Unable to detect yt-dlp version:', result.error?.message || result.stderr?.trim() || result.status);
-      YtDlpController.ytdlpVersionCache.set(this.ytdlpPath, null);
+      YtDlpController.ytdlpVersionCache.set(binaryPath, null);
       return null;
     }
 
     const version = result.stdout.trim() || null;
-    YtDlpController.ytdlpVersionCache.set(this.ytdlpPath, version);
+    YtDlpController.ytdlpVersionCache.set(binaryPath, version);
     return version;
   }
 

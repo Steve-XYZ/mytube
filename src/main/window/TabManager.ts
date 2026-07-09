@@ -1,7 +1,10 @@
-import { BaseWindow, WebContentsView, ipcMain, session, Menu, MenuItem, clipboard, dialog } from 'electron';
+import { app, BaseWindow, WebContentsView, ipcMain, session, Menu, MenuItem, clipboard, dialog } from 'electron';
+import * as fs from 'fs';
+import * as path from 'path';
 import { TabInfo, IPC_CHANNELS, FindInPageResult } from '../../shared/types';
 import { DEFAULT_URL, HEADER_HEIGHT } from '../../shared/constants';
 import type { SettingsManager } from '../settings/SettingsManager';
+import { writeFileAtomic } from '../utils/fsAtomic';
 import { YtDlpController } from '../download/YtDlpController';
 import { isDirectMediaResourceUrl, isLikelyMediaUrl } from '../download/MediaUrlClassifier';
 import type { CapturedMediaFallback, MediaFallbackProvider } from '../download/MediaFallbackProvider';
@@ -18,6 +21,7 @@ interface ManagedTab {
 
 const TAB_SUSPEND_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_TABS = 20;
+const SESSION_SAVE_DEBOUNCE_MS = 1000;
 const MAX_CAPTURED_MEDIA_PER_TAB = 20;
 const CAPTURED_MEDIA_TTL_MS = 10 * 60 * 1000;
 
@@ -26,6 +30,22 @@ interface MediaRequestDetails {
   url: string;
   resourceType?: string;
   requestHeaders?: Record<string, string | string[]>;
+}
+
+/** Receives main-frame navigations for the browsing history. */
+export interface VisitRecorder {
+  recordVisit(url: string, title: string): void;
+  updateVisitTitle(url: string, title: string): void;
+}
+
+interface SavedSessionTab {
+  url: string;
+  title: string;
+}
+
+interface SavedSession {
+  tabs: SavedSessionTab[];
+  activeIndex: number;
 }
 
 export class TabManager implements MediaFallbackProvider {
@@ -42,6 +62,10 @@ export class TabManager implements MediaFallbackProvider {
   private ytdlp: YtDlpController;
   private mediaDetectionAbort: Map<string, boolean> = new Map();
   private suspendTimer: ReturnType<typeof setInterval> | null = null;
+  private sessionFilePath: string;
+  private sessionSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private destroyed = false;
+  private visitRecorder?: VisitRecorder;
 
   constructor(
     window: BaseWindow,
@@ -49,13 +73,16 @@ export class TabManager implements MediaFallbackProvider {
     preloadPath: string,
     settingsManager?: SettingsManager,
     mediaDetector?: MediaDetector,
+    visitRecorder?: VisitRecorder,
   ) {
     this.window = window;
     this.appView = appView;
     this.preloadPath = preloadPath;
     this.settingsManager = settingsManager;
     this.mediaDetector = mediaDetector;
+    this.visitRecorder = visitRecorder;
     this.ytdlp = new YtDlpController();
+    this.sessionFilePath = path.join(app.getPath('userData'), 'session-state.json');
     this.setupIpcHandlers();
     this.setupPermissions();
     this.setupMediaRequestCapture();
@@ -94,35 +121,11 @@ export class TabManager implements MediaFallbackProvider {
   }
 
   private setupPermissions(): void {
-    const ses = session.defaultSession;
-
-    // Set a standard Chrome user agent to avoid being blocked by sites like YouTube
+    // Set a standard Chrome user agent to avoid being blocked by sites like YouTube.
+    // Permission request/check handling lives in SitePermissionManager.
     const chromeVersion = process.versions.chrome;
     const userAgent = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
-    ses.setUserAgent(userAgent);
-
-    const allowedPermissions = [
-      'clipboard-read',
-      'clipboard-sanitized-write',
-      'fullscreen',
-      'mediaKeySystem', // DRM (Widevine) — required for YouTube
-      'media', // General media playback
-      'notifications',
-      'pointerLock',
-    ];
-
-    ses.setPermissionRequestHandler((_webContents, permission, callback) => {
-      const allowed = allowedPermissions.includes(permission);
-      if (!allowed) {
-        log.info(`Permission denied: ${permission}`);
-      }
-      callback(allowed);
-    });
-
-    // Some permissions are checked without a request (synchronous check)
-    ses.setPermissionCheckHandler((_webContents, permission) => {
-      return allowedPermissions.includes(permission);
-    });
+    session.defaultSession.setUserAgent(userAgent);
   }
 
   private setupMediaRequestCapture(): void {
@@ -135,6 +138,20 @@ export class TabManager implements MediaFallbackProvider {
   // ==================== Tab Lifecycle ====================
 
   createTab(url?: string): TabInfo | null {
+    const targetUrl = this.normalizeNavigationInput(url || this.settingsManager?.getHomepage() || DEFAULT_URL);
+    const managedTab = this.buildTab(targetUrl);
+    if (!managedTab) return null;
+
+    managedTab.info.isLoading = true;
+    this.loadTabUrl(managedTab, targetUrl);
+    this.switchTab(managedTab.id);
+
+    log.info(`Tab created: ${managedTab.id} -> ${targetUrl}`);
+    return managedTab.info;
+  }
+
+  /** Create a managed tab (view, events, registration) without loading or activating it. */
+  private buildTab(targetUrl: string, title = 'New Tab'): ManagedTab | null {
     // Enforce max tab limit
     if (this.tabs.size >= MAX_TABS) {
       log.warn(`Tab limit reached (${MAX_TABS}). Cannot create new tab.`);
@@ -142,7 +159,6 @@ export class TabManager implements MediaFallbackProvider {
     }
 
     const tabId = `tab-${this.nextTabId++}`;
-    const targetUrl = this.normalizeNavigationInput(url || this.settingsManager?.getHomepage() || DEFAULT_URL);
 
     const view = new WebContentsView({
       webPreferences: {
@@ -156,9 +172,9 @@ export class TabManager implements MediaFallbackProvider {
 
     const tabInfo: TabInfo = {
       id: tabId,
-      title: 'New Tab',
+      title,
       url: targetUrl,
-      isLoading: true,
+      isLoading: false,
       canGoBack: false,
       canGoForward: false,
       isSecure: targetUrl.startsWith('https://'),
@@ -175,11 +191,90 @@ export class TabManager implements MediaFallbackProvider {
     this.setupContextMenu(managedTab);
     this.mediaDetector?.registerTabWebContents(view.webContents.id);
 
-    this.loadTabUrl(managedTab, targetUrl);
-    this.switchTab(tabId);
+    return managedTab;
+  }
 
-    log.info(`Tab created: ${tabId} -> ${targetUrl}`);
-    return tabInfo;
+  // ==================== Session Restore ====================
+
+  /**
+   * Recreate the previous session's tabs, or open a fresh tab when restore is
+   * disabled or nothing usable was saved. Restored background tabs stay
+   * suspended (they load on first activation) so startup never loads N pages.
+   */
+  restoreSession(): void {
+    const restoreEnabled = this.settingsManager ? this.settingsManager.get('browser.restoreSession') !== false : true;
+    const saved = restoreEnabled ? this.readSessionState() : null;
+
+    if (!saved) {
+      this.createTab();
+      return;
+    }
+
+    const restored: ManagedTab[] = [];
+    for (const savedTab of saved.tabs.slice(0, MAX_TABS)) {
+      const managedTab = this.buildTab(savedTab.url, savedTab.title);
+      if (!managedTab) break;
+      managedTab.suspendedUrl = savedTab.url;
+      this.notifyTabUpdate(managedTab.info);
+      restored.push(managedTab);
+    }
+
+    if (restored.length === 0) {
+      this.createTab();
+      return;
+    }
+
+    const activeIndex = Math.min(Math.max(saved.activeIndex, 0), restored.length - 1);
+    this.switchTab(restored[activeIndex].id);
+    log.info(`Session restored: ${restored.length} tab(s), active index ${activeIndex}`);
+  }
+
+  private isPersistableUrl(url: string): boolean {
+    return url.startsWith('http://') || url.startsWith('https://') || url === DEFAULT_URL;
+  }
+
+  private readSessionState(): SavedSession | null {
+    try {
+      if (!fs.existsSync(this.sessionFilePath)) return null;
+      const raw = JSON.parse(fs.readFileSync(this.sessionFilePath, 'utf-8')) as Partial<SavedSession>;
+      if (!Array.isArray(raw.tabs)) return null;
+
+      const tabs = raw.tabs
+        .filter((tab): tab is SavedSessionTab => typeof tab === 'object' && tab !== null && typeof tab.url === 'string')
+        .map((tab) => ({ url: tab.url, title: typeof tab.title === 'string' && tab.title ? tab.title : 'New Tab' }))
+        .filter((tab) => this.isPersistableUrl(tab.url));
+      if (tabs.length === 0) return null;
+
+      return { tabs, activeIndex: typeof raw.activeIndex === 'number' ? raw.activeIndex : 0 };
+    } catch (err: unknown) {
+      log.warn('Failed to read session state:', err instanceof Error ? err.message : String(err));
+      return null;
+    }
+  }
+
+  private scheduleSessionSave(): void {
+    if (this.sessionSaveTimer) return;
+    this.sessionSaveTimer = setTimeout(() => {
+      this.sessionSaveTimer = null;
+      this.saveSessionState();
+    }, SESSION_SAVE_DEBOUNCE_MS);
+  }
+
+  private saveSessionState(): void {
+    try {
+      // Suspended tabs keep their target in suspendedUrl while the view is empty.
+      const persistable = Array.from(this.tabs.values()).filter((tab) =>
+        this.isPersistableUrl(tab.suspendedUrl || tab.info.url),
+      );
+      const tabs = persistable.map((tab) => ({ url: tab.suspendedUrl || tab.info.url, title: tab.info.title }));
+      const activeIndex = Math.max(
+        0,
+        persistable.findIndex((tab) => tab.id === this.activeTabId),
+      );
+      writeFileAtomic(this.sessionFilePath, JSON.stringify({ tabs, activeIndex }, null, 2));
+    } catch (err: unknown) {
+      log.warn('Failed to save session state:', err instanceof Error ? err.message : String(err));
+    }
   }
 
   closeTab(tabId: string): boolean {
@@ -194,6 +289,7 @@ export class TabManager implements MediaFallbackProvider {
     this.tabs.delete(tabId);
 
     log.info(`Tab closed: ${tabId}`);
+    this.scheduleSessionSave();
 
     if (this.activeTabId === tabId) {
       const remaining = Array.from(this.tabs.keys());
@@ -414,15 +510,21 @@ export class TabManager implements MediaFallbackProvider {
 
     wc.on('did-navigate', (_event, navUrl) => {
       this.updateNavState(managedTab, this.getDisplayUrlForLoadedUrl(navUrl));
+      // info.title still holds the previous page's title here; record with an
+      // empty title (falls back to the URL) and let page-title-updated fill it.
+      this.visitRecorder?.recordVisit(info.url, '');
     });
 
     wc.on('did-navigate-in-page', (_event, navUrl) => {
       this.updateNavState(managedTab, this.getDisplayUrlForLoadedUrl(navUrl));
+      // Same document: the current title still applies to in-page navigations.
+      this.visitRecorder?.recordVisit(info.url, info.title);
     });
 
     wc.on('page-title-updated', (_event, title) => {
       info.title = title;
       this.notifyTabUpdate(info);
+      this.visitRecorder?.updateVisitTitle(info.url, title);
     });
 
     wc.on('page-favicon-updated', (_event, favicons) => {
@@ -863,6 +965,9 @@ export class TabManager implements MediaFallbackProvider {
 
   private notifyTabUpdate(tabInfo: TabInfo): void {
     this.appView.webContents.send(IPC_CHANNELS.TAB_UPDATE, tabInfo);
+    // Every meaningful tab change (navigation, title, switch) flows through
+    // here, so it doubles as the session persistence trigger.
+    this.scheduleSessionSave();
   }
 
   private normalizeComparableUrl(url: string): string {
@@ -1098,6 +1203,18 @@ export class TabManager implements MediaFallbackProvider {
   }
 
   destroy(): void {
+    // destroy() runs from both before-quit and the window closed handler; a
+    // second pass would save an empty session over the real one.
+    if (this.destroyed) return;
+    this.destroyed = true;
+
+    // Flush the pending (debounced) session save before tabs are torn down.
+    if (this.sessionSaveTimer) {
+      clearTimeout(this.sessionSaveTimer);
+      this.sessionSaveTimer = null;
+    }
+    this.saveSessionState();
+
     if (this.suspendTimer) {
       clearInterval(this.suspendTimer);
       this.suspendTimer = null;

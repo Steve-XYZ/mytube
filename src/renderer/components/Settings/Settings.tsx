@@ -242,17 +242,9 @@ function GeneralSettings({
         </select>
       </div>
 
-      <div className="settings-row">
-        <div className="settings-label">
-          <span>Language</span>
-          <span className="settings-description">Interface language</span>
-        </div>
-        <select value={settings.general.language} onChange={(e) => onUpdate('general.language', e.target.value)}>
-          <option value="en">English</option>
-          <option value="es">Español</option>
-        </select>
-      </div>
-
+      {/* The language selector is intentionally absent: general.language stays
+          in the settings schema, but there is no i18n system yet, so showing a
+          selector that does nothing would mislead users. */}
       <div className="settings-row">
         <div className="settings-label">
           <span>Start on boot</span>
@@ -372,6 +364,23 @@ function DownloadSettings({
           onChange={(e) => onUpdate('downloads.speedLimitKbps', Math.max(0, parseInt(e.target.value, 10) || 0))}
         />
       </div>
+
+      <div className="settings-row">
+        <div className="settings-label">
+          <span>Keep yt-dlp updated</span>
+          <span className="settings-description">
+            Automatically download yt-dlp updates so video sites keep working
+          </span>
+        </div>
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={settings.downloads.autoUpdateYtDlp}
+            onChange={(e) => onUpdate('downloads.autoUpdateYtDlp', e.target.checked)}
+          />
+          <span className="settings-toggle-slider" />
+        </label>
+      </div>
     </div>
   );
 }
@@ -415,6 +424,46 @@ function BrowserSettings({
           <option value="bing">Bing</option>
         </select>
       </div>
+
+      <div className="settings-row">
+        <div className="settings-label">
+          <span>Restore session</span>
+          <span className="settings-description">Reopen your tabs from the previous session on launch</span>
+        </div>
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={settings.browser.restoreSession}
+            onChange={(e) => onUpdate('browser.restoreSession', e.target.checked)}
+          />
+          <span className="settings-toggle-slider" />
+        </label>
+      </div>
+
+      <SitePermissionsRow />
+    </div>
+  );
+}
+
+function SitePermissionsRow() {
+  const [cleared, setCleared] = useState(false);
+
+  const handleClear = useCallback(async () => {
+    await window.electronAPI.clearSitePermissions();
+    setCleared(true);
+  }, []);
+
+  return (
+    <div className="settings-row">
+      <div className="settings-label">
+        <span>Site permissions</span>
+        <span className="settings-description">
+          Forget every remembered camera, microphone, clipboard, and notification decision
+        </span>
+      </div>
+      <button className="settings-btn" onClick={handleClear} disabled={cleared}>
+        {cleared ? 'Cleared' : 'Clear all'}
+      </button>
     </div>
   );
 }

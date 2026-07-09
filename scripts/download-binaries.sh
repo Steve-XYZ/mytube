@@ -12,12 +12,84 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BIN_DIR="$ROOT_DIR/bin"
+BIN_DIR="${MYTUBE_BIN_STAGE_DIR:-$ROOT_DIR/bin}"
 CURL=(curl --location --fail --http1.1 --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 --progress-bar)
 YTDLP_BASE="https://github.com/yt-dlp/yt-dlp/releases/latest/download"
+BTBN_BASE="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
 
 # Cache the universal macOS yt-dlp so multiple mac targets share one download.
 YTDLP_MACOS_CACHE=""
+# Checksum manifests, downloaded once per run.
+YTDLP_SUMS_CACHE=""
+BTBN_SUMS_CACHE=""
+
+sha256_of() { # file
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
+  else echo ""; fi
+}
+
+md5_of() { # file
+  if command -v md5sum >/dev/null 2>&1; then md5sum "$1" | awk '{print $1}'
+  elif command -v md5 >/dev/null 2>&1; then md5 -q "$1"
+  else echo ""; fi
+}
+
+# Verify a file against a `<hash>  <name>` manifest. Deletes the file and fails
+# on mismatch so a tampered/corrupt download can never be staged.
+verify_against_manifest() { # file assetname manifest hashcmd label
+  local file="$1" asset="$2" manifest="$3" hashcmd="$4" label="$5" expected actual
+  expected="$(awk -v name="$asset" '$2 == name || $2 == "*" name {print $1; exit}' "$manifest")"
+  if [ -z "$expected" ]; then
+    rm -f "$file"
+    echo "ERROR: $label manifest has no entry for $asset" >&2
+    return 1
+  fi
+  actual="$("$hashcmd" "$file")"
+  if [ -z "$actual" ]; then
+    rm -f "$file"
+    echo "ERROR: no checksum tool available to verify $asset (need shasum/sha256sum/md5sum)" >&2
+    return 1
+  fi
+  if [ "$actual" != "$expected" ]; then
+    rm -f "$file"
+    echo "ERROR: checksum mismatch for $asset (expected $expected, got $actual)" >&2
+    echo "       The download may be corrupt or tampered with. Re-run to retry." >&2
+    return 1
+  fi
+  echo "    checksum OK: $asset"
+}
+
+verify_ytdlp() { # file assetname
+  if [ -z "$YTDLP_SUMS_CACHE" ]; then
+    YTDLP_SUMS_CACHE="$BIN_DIR/.yt-dlp_sums.cache"
+    download "$YTDLP_BASE/SHA2-256SUMS" "$YTDLP_SUMS_CACHE"
+  fi
+  verify_against_manifest "$1" "$2" "$YTDLP_SUMS_CACHE" sha256_of "yt-dlp SHA2-256SUMS"
+}
+
+verify_btbn() { # file assetname
+  if [ -z "$BTBN_SUMS_CACHE" ]; then
+    BTBN_SUMS_CACHE="$BIN_DIR/.btbn_sums.cache"
+    download "$BTBN_BASE/checksums.sha256" "$BTBN_SUMS_CACHE"
+  fi
+  verify_against_manifest "$1" "$2" "$BTBN_SUMS_CACHE" sha256_of "BtbN checksums.sha256"
+}
+
+verify_johnvansickle_md5() { # file url
+  local file="$1" url="$2" md5file expected actual
+  md5file="$file.md5.tmp"
+  download "$url.md5" "$md5file"
+  expected="$(awk '{print $1; exit}' "$md5file")"
+  rm -f "$md5file"
+  actual="$(md5_of "$file")"
+  if [ -z "$expected" ] || [ -z "$actual" ] || [ "$actual" != "$expected" ]; then
+    rm -f "$file"
+    echo "ERROR: md5 mismatch for $(basename "$file") (expected ${expected:-?}, got ${actual:-?})" >&2
+    return 1
+  fi
+  echo "    checksum OK: $(basename "$file")"
+}
 
 download() { # url dest
   local url="$1" dest="$2" tmp="$2.tmp"
@@ -96,13 +168,17 @@ fetch_ytdlp() { # os arch destdir
       if [ -z "$YTDLP_MACOS_CACHE" ]; then
         YTDLP_MACOS_CACHE="$BIN_DIR/.yt-dlp_macos.cache"
         download "$YTDLP_BASE/yt-dlp_macos" "$YTDLP_MACOS_CACHE"
+        verify_ytdlp "$YTDLP_MACOS_CACHE" "yt-dlp_macos"
       fi
       cp "$YTDLP_MACOS_CACHE" "$dest"; chmod +x "$dest" ;;
     linux)
       local asset="yt-dlp_linux"; [ "$arch" = "arm64" ] && asset="yt-dlp_linux_aarch64"
-      download "$YTDLP_BASE/$asset" "$dir/yt-dlp"; chmod +x "$dir/yt-dlp" ;;
+      download "$YTDLP_BASE/$asset" "$dir/yt-dlp"
+      verify_ytdlp "$dir/yt-dlp" "$asset"
+      chmod +x "$dir/yt-dlp" ;;
     win)
-      download "$YTDLP_BASE/yt-dlp.exe" "$dir/yt-dlp.exe" ;;
+      download "$YTDLP_BASE/yt-dlp.exe" "$dir/yt-dlp.exe"
+      verify_ytdlp "$dir/yt-dlp.exe" "yt-dlp.exe" ;;
   esac
 }
 
@@ -121,6 +197,8 @@ fetch_ffmpeg() { # os arch destdir
   trap 'rm -rf "$tmp"' RETURN
   case "$os" in
     mac)
+      # osxexperts.net publishes no checksum manifests, so these zips can only
+      # be integrity-checked implicitly (HTTPS + non-empty + executable probe).
       local fm fp
       if [ "$arch" = "arm64" ]; then
         fm="https://www.osxexperts.net/ffmpeg7arm.zip"; fp="https://www.osxexperts.net/ffprobe7arm.zip"
@@ -133,13 +211,16 @@ fetch_ffmpeg() { # os arch destdir
       chmod +x "$dir/ffmpeg" "$dir/ffprobe" ;;
     linux)
       local slug="amd64"; [ "$arch" = "arm64" ] && slug="arm64"
-      download "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${slug}-static.tar.xz" "$tmp/ffmpeg.tar.xz"
+      local url="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${slug}-static.tar.xz"
+      download "$url" "$tmp/ffmpeg.tar.xz"
+      verify_johnvansickle_md5 "$tmp/ffmpeg.tar.xz" "$url"
       tar -xf "$tmp/ffmpeg.tar.xz" -C "$tmp"
       local sub; sub="$(find "$tmp" -maxdepth 1 -type d -name 'ffmpeg-*-static' | head -1)"
       mv "$sub/ffmpeg" "$dir/ffmpeg"; mv "$sub/ffprobe" "$dir/ffprobe"
       chmod +x "$dir/ffmpeg" "$dir/ffprobe" ;;
     win)
-      download "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" "$tmp/ffmpeg.zip"
+      download "$BTBN_BASE/ffmpeg-master-latest-win64-gpl.zip" "$tmp/ffmpeg.zip"
+      verify_btbn "$tmp/ffmpeg.zip" "ffmpeg-master-latest-win64-gpl.zip"
       extract_zip "$tmp/ffmpeg.zip" "$tmp"
       local bindir; bindir="$(dirname "$(find "$tmp" -type f -name 'ffmpeg.exe' | head -1)")"
       mv "$bindir/ffmpeg.exe" "$dir/ffmpeg.exe"; mv "$bindir/ffprobe.exe" "$dir/ffprobe.exe" ;;
@@ -180,7 +261,7 @@ main() {
     stage_target "$os" "$arch"
   done
 
-  rm -f "$BIN_DIR/.yt-dlp_macos.cache"
+  rm -f "$BIN_DIR/.yt-dlp_macos.cache" "$BIN_DIR/.yt-dlp_sums.cache" "$BIN_DIR/.btbn_sums.cache"
   echo ""
   echo "==> Done. Staged targets: ${targets[*]}"
 }

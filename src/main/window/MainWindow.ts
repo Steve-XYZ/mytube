@@ -1,4 +1,4 @@
-import { BaseWindow, ipcMain, WebContentsView } from 'electron';
+import { app, BaseWindow, ipcMain, WebContentsView } from 'electron';
 import * as path from 'path';
 import {
   DEFAULT_WINDOW_WIDTH,
@@ -16,6 +16,11 @@ import { SettingsManager } from '../settings/SettingsManager';
 import { AutoUpdater } from '../updater/AutoUpdater';
 import { AppMenu } from './AppMenu';
 import { GoogleAuthManager } from '../auth/GoogleAuthManager';
+import { YtDlpUpdater, getManagedYtDlpDir } from '../download/YtDlpUpdater';
+import { readWindowState, trackWindowState } from './WindowState';
+import { SitePermissionManager } from './SitePermissionManager';
+import { HistoryManager } from '../history/HistoryManager';
+import { BookmarksManager } from '../bookmarks/BookmarksManager';
 
 export class MainWindow {
   private window: BaseWindow;
@@ -27,12 +32,23 @@ export class MainWindow {
   private settingsManager: SettingsManager;
   private googleAuthManager: GoogleAuthManager;
   private autoUpdater: AutoUpdater;
+  private ytdlpUpdater: YtDlpUpdater;
+  private sitePermissionManager: SitePermissionManager;
+  private historyManager: HistoryManager;
+  private bookmarksManager: BookmarksManager;
   private shellOverlayOpen = false;
 
   constructor() {
-    this.window = new BaseWindow({
+    const windowStatePath = path.join(app.getPath('userData'), 'window-state.json');
+    const windowState = readWindowState(windowStatePath, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT, {
       width: DEFAULT_WINDOW_WIDTH,
       height: DEFAULT_WINDOW_HEIGHT,
+    });
+
+    this.window = new BaseWindow({
+      width: windowState.width,
+      height: windowState.height,
+      ...(windowState.x !== undefined && windowState.y !== undefined ? { x: windowState.x, y: windowState.y } : {}),
       minWidth: MIN_WINDOW_WIDTH,
       minHeight: MIN_WINDOW_HEIGHT,
       title: APP_NAME,
@@ -40,6 +56,10 @@ export class MainWindow {
       trafficLightPosition: { x: 12, y: 10 },
       show: false,
     });
+    if (windowState.isMaximized) {
+      this.window.maximize();
+    }
+    trackWindowState(this.window, windowStatePath);
 
     const preloadPath = path.join(__dirname, '..', '..', 'preload', 'index.js');
 
@@ -56,14 +76,57 @@ export class MainWindow {
     this.window.contentView.addChildView(this.appView);
     this.updateAppViewBounds();
 
+    // Per-site permission prompts must be registered before any tab exists.
+    this.sitePermissionManager = new SitePermissionManager({
+      storePath: path.join(app.getPath('userData'), 'site-permissions.json'),
+      shellSender: this.appView.webContents,
+      shellWebContentsId: this.appView.webContents.id,
+    });
+
     // Initialize managers
     this.settingsManager = new SettingsManager(this.appView.webContents);
     this.googleAuthManager = new GoogleAuthManager();
     this.mediaDetector = new MediaDetector(this.appView.webContents);
-    this.tabManager = new TabManager(this.window, this.appView, preloadPath, this.settingsManager, this.mediaDetector);
+    this.historyManager = new HistoryManager({
+      storePath: path.join(app.getPath('userData'), 'history.json'),
+    });
+    this.bookmarksManager = new BookmarksManager({
+      storePath: path.join(app.getPath('userData'), 'bookmarks.json'),
+      shellSender: this.appView.webContents,
+    });
+    this.tabManager = new TabManager(
+      this.window,
+      this.appView,
+      preloadPath,
+      this.settingsManager,
+      this.mediaDetector,
+      this.historyManager,
+    );
     this.keyboardShortcuts = new KeyboardShortcuts(this.window, this.tabManager, this.appView);
     this.downloadManager = new DownloadManager(this.appView.webContents, this.settingsManager, this.tabManager);
     this.autoUpdater = new AutoUpdater(this.appView.webContents);
+
+    // Keep yt-dlp fresh on installed apps: YouTube changes routinely break
+    // older snapshots, so a runtime updater matters more than app releases.
+    // MYTUBE_BIN_DIR pins binaries for tests, so the updater stays off there.
+    this.ytdlpUpdater = new YtDlpUpdater({
+      managedDir: getManagedYtDlpDir(app.getPath('userData')),
+      currentVersionProvider: () => this.downloadManager.getYtDlpVersion(),
+      onUpdated: () => this.downloadManager.refreshYtDlpBinary(),
+    });
+    const ytdlpAutoUpdateEnabled = () =>
+      !process.env.MYTUBE_BIN_DIR && this.settingsManager.get('downloads.autoUpdateYtDlp') !== false;
+    if (ytdlpAutoUpdateEnabled()) {
+      this.ytdlpUpdater.start();
+    }
+    this.settingsManager.onSettingChanged((key) => {
+      if (key !== 'downloads.autoUpdateYtDlp') return;
+      if (ytdlpAutoUpdateEnabled()) {
+        this.ytdlpUpdater.start();
+      } else {
+        this.ytdlpUpdater.stop();
+      }
+    });
 
     // Set up native app menu
     new AppMenu(this.tabManager, this.appView);
@@ -123,8 +186,8 @@ export class MainWindow {
       }
     });
 
-    // Create the first tab
-    this.tabManager.createTab();
+    // Restore the previous session's tabs, or start with a fresh tab.
+    this.tabManager.restoreSession();
   }
 
   private loadRenderer(): void {
@@ -167,6 +230,10 @@ export class MainWindow {
   }
 
   destroy(): void {
+    this.ytdlpUpdater.stop();
+    this.sitePermissionManager.destroy();
+    this.historyManager.destroy();
+    this.bookmarksManager.destroy();
     this.keyboardShortcuts.destroy();
     this.downloadManager.destroy();
     this.mediaDetector.destroy();

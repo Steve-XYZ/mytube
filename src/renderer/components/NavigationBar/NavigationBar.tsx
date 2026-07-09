@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react';
-import type { TabInfo, MediaDetectionState } from '../../../shared/types';
+import React, { useState, useCallback, useEffect } from 'react';
+import type { TabInfo, MediaDetectionState, Bookmark } from '../../../shared/types';
 import './NavigationBar.css';
 
 interface NavigationBarProps {
@@ -7,9 +7,14 @@ interface NavigationBarProps {
   urlInputRef: React.RefObject<HTMLInputElement | null>;
   onDownloadClick: () => void;
   onToggleDownloadPanel: () => void;
+  onToggleHistoryPanel: () => void;
   onImageGalleryClick: () => void;
   onSettingsClick: () => void;
   mediaState: MediaDetectionState;
+}
+
+function isBookmarkableUrl(url: string): boolean {
+  return url.startsWith('http://') || url.startsWith('https://');
 }
 
 export function NavigationBar({
@@ -17,14 +22,45 @@ export function NavigationBar({
   urlInputRef,
   onDownloadClick,
   onToggleDownloadPanel,
+  onToggleHistoryPanel,
   onImageGalleryClick,
   onSettingsClick,
   mediaState,
 }: NavigationBarProps) {
   const [urlInput, setUrlInput] = useState('');
   const [isFocused, setIsFocused] = useState(false);
+  // Tied to the URL it was resolved for, so switching tabs/URLs never shows
+  // the previous page's star state while the async check is in flight.
+  const [bookmarkState, setBookmarkState] = useState<{ url: string; bookmarked: boolean } | null>(null);
   const activeUrl = activeTab?.url ?? '';
   const displayedUrl = isFocused ? urlInput : activeUrl;
+  const canBookmark = isBookmarkableUrl(activeUrl);
+
+  // Keep the star in sync with the active URL and with bookmark changes.
+  useEffect(() => {
+    if (!canBookmark) return;
+    let cancelled = false;
+    window.electronAPI.isBookmarked(activeUrl).then((state: unknown) => {
+      if (!cancelled) setBookmarkState({ url: activeUrl, bookmarked: state === true });
+    });
+    const unsubscribe = window.electronAPI.onBookmarksChanged((items: unknown[]) => {
+      setBookmarkState({ url: activeUrl, bookmarked: (items as Bookmark[]).some((item) => item.url === activeUrl) });
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [activeUrl, canBookmark]);
+
+  const starActive = canBookmark && bookmarkState?.url === activeUrl && bookmarkState.bookmarked;
+
+  const handleToggleBookmark = useCallback(async () => {
+    if (!canBookmark) return;
+    const result = (await window.electronAPI.toggleBookmark(activeUrl, activeTab?.title)) as {
+      bookmarked: boolean;
+    };
+    setBookmarkState({ url: activeUrl, bookmarked: result.bookmarked });
+  }, [canBookmark, activeUrl, activeTab?.title]);
 
   const handleNavigate = useCallback(
     (e: React.FormEvent) => {
@@ -158,6 +194,32 @@ export function NavigationBar({
             {zoomPercent}%
           </button>
         )}
+
+        {/* Bookmark star */}
+        <button
+          className={`nav-btn ${starActive ? 'nav-btn-star-active' : ''}`}
+          onClick={handleToggleBookmark}
+          disabled={!canBookmark}
+          title={starActive ? 'Remove bookmark' : 'Bookmark this page'}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16">
+            <path
+              d="M8 1.5l2 4.1 4.5.65-3.25 3.17.77 4.48L8 11.77 3.98 13.9l.77-4.48L1.5 6.25 6 5.6 8 1.5z"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              fill={starActive ? 'currentColor' : 'none'}
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+
+        {/* History & bookmarks panel */}
+        <button className="nav-btn" onClick={onToggleHistoryPanel} title="History and bookmarks">
+          <svg width="16" height="16" viewBox="0 0 16 16">
+            <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.5" fill="none" />
+            <path d="M8 4.5V8l2.5 1.7" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+          </svg>
+        </button>
 
         {/* Image gallery button */}
         <button className="nav-btn" onClick={onImageGalleryClick} title="Scan page images">
