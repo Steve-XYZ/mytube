@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import type { HistoryEntry, Bookmark } from '../../../shared/types';
 import './HistoryPanel.css';
 
@@ -15,9 +15,15 @@ export function HistoryPanel({ visible, onClose }: HistoryPanelProps) {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [search, setSearch] = useState('');
 
+  // Guards against out-of-order responses while typing in the search box.
+  const historyRequestToken = useRef(0);
+
   const refreshHistory = useCallback((query: string) => {
+    const token = ++historyRequestToken.current;
     window.electronAPI.getHistory({ search: query || undefined }).then((entries: unknown) => {
-      setHistory((entries as HistoryEntry[]) || []);
+      if (token === historyRequestToken.current) {
+        setHistory((entries as HistoryEntry[]) || []);
+      }
     });
   }, []);
 

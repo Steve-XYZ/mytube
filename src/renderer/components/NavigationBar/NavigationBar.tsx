@@ -29,21 +29,22 @@ export function NavigationBar({
 }: NavigationBarProps) {
   const [urlInput, setUrlInput] = useState('');
   const [isFocused, setIsFocused] = useState(false);
-  const [bookmarked, setBookmarked] = useState(false);
+  // Tied to the URL it was resolved for, so switching tabs/URLs never shows
+  // the previous page's star state while the async check is in flight.
+  const [bookmarkState, setBookmarkState] = useState<{ url: string; bookmarked: boolean } | null>(null);
   const activeUrl = activeTab?.url ?? '';
   const displayedUrl = isFocused ? urlInput : activeUrl;
   const canBookmark = isBookmarkableUrl(activeUrl);
 
   // Keep the star in sync with the active URL and with bookmark changes.
-  // Non-bookmarkable URLs derive an inactive star instead of resetting state.
   useEffect(() => {
     if (!canBookmark) return;
     let cancelled = false;
     window.electronAPI.isBookmarked(activeUrl).then((state: unknown) => {
-      if (!cancelled) setBookmarked(state === true);
+      if (!cancelled) setBookmarkState({ url: activeUrl, bookmarked: state === true });
     });
     const unsubscribe = window.electronAPI.onBookmarksChanged((items: unknown[]) => {
-      setBookmarked((items as Bookmark[]).some((bookmark) => bookmark.url === activeUrl));
+      setBookmarkState({ url: activeUrl, bookmarked: (items as Bookmark[]).some((item) => item.url === activeUrl) });
     });
     return () => {
       cancelled = true;
@@ -51,14 +52,14 @@ export function NavigationBar({
     };
   }, [activeUrl, canBookmark]);
 
-  const starActive = canBookmark && bookmarked;
+  const starActive = canBookmark && bookmarkState?.url === activeUrl && bookmarkState.bookmarked;
 
   const handleToggleBookmark = useCallback(async () => {
     if (!canBookmark) return;
     const result = (await window.electronAPI.toggleBookmark(activeUrl, activeTab?.title)) as {
       bookmarked: boolean;
     };
-    setBookmarked(result.bookmarked);
+    setBookmarkState({ url: activeUrl, bookmarked: result.bookmarked });
   }, [canBookmark, activeUrl, activeTab?.title]);
 
   const handleNavigate = useCallback(

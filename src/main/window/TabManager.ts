@@ -510,11 +510,14 @@ export class TabManager implements MediaFallbackProvider {
 
     wc.on('did-navigate', (_event, navUrl) => {
       this.updateNavState(managedTab, this.getDisplayUrlForLoadedUrl(navUrl));
-      this.visitRecorder?.recordVisit(info.url, info.title);
+      // info.title still holds the previous page's title here; record with an
+      // empty title (falls back to the URL) and let page-title-updated fill it.
+      this.visitRecorder?.recordVisit(info.url, '');
     });
 
     wc.on('did-navigate-in-page', (_event, navUrl) => {
       this.updateNavState(managedTab, this.getDisplayUrlForLoadedUrl(navUrl));
+      // Same document: the current title still applies to in-page navigations.
       this.visitRecorder?.recordVisit(info.url, info.title);
     });
 

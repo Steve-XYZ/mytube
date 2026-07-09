@@ -31,7 +31,7 @@ export class HistoryManager {
     this.storePath = options.storePath;
     this.entries = this.loadEntries();
 
-    ipcMain.handle(IPC_CHANNELS.HISTORY_LIST, (_event, query?: HistoryQuery) => this.list(query ?? {}));
+    ipcMain.handle(IPC_CHANNELS.HISTORY_LIST, (_event, query?: unknown) => this.list(sanitizeQuery(query)));
     ipcMain.handle(IPC_CHANNELS.HISTORY_DELETE, (_event, id: string) => {
       if (typeof id !== 'string') return false;
       return this.deleteEntry(id);
@@ -147,4 +147,14 @@ export class HistoryManager {
 
 function isRecordableUrl(url: string): boolean {
   return url.startsWith('http://') || url.startsWith('https://');
+}
+
+/** IPC payloads are caller-controlled; keep only well-typed query fields. */
+function sanitizeQuery(query: unknown): HistoryQuery {
+  if (typeof query !== 'object' || query === null) return {};
+  const raw = query as Record<string, unknown>;
+  const safe: HistoryQuery = {};
+  if (typeof raw.search === 'string') safe.search = raw.search;
+  if (typeof raw.limit === 'number' && Number.isFinite(raw.limit)) safe.limit = raw.limit;
+  return safe;
 }

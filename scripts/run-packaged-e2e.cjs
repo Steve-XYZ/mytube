@@ -97,4 +97,5 @@ const result = spawnSync('pnpm', ['exec', 'playwright', 'test', 'tests/e2e/packa
     MYTUBE_PACKAGED_MOCK_BINS: mocked ? '1' : '0',
   },
 });
-process.exit(result.status || 0);
+// status is null when the process died from a signal — treat that as failure.
+process.exit(result.status ?? 1);
