@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { randomUUID } from 'crypto';
 import { DownloadItem, IPC_CHANNELS } from '../../shared/types';
 import { YtDlpController, DownloadOptions, DownloadProgress } from './YtDlpController';
+import type { DownloadTarget } from './DownloadTargetResolver';
 import type { CapturedMediaFallback, MediaFallbackProvider } from './MediaFallbackProvider';
 import type { SettingsManager } from '../settings/SettingsManager';
 import { writeFileAtomic } from '../utils/fsAtomic';
@@ -19,6 +20,7 @@ interface StartDownloadOptions {
 
 const MAX_DOWNLOAD_HISTORY = 500;
 const PROGRESS_THROTTLE_MS = 500;
+const RESOLVED_TARGET_TTL_MS = 2 * 60 * 1000;
 
 export class DownloadManager {
   private ytdlp: YtDlpController;
@@ -29,6 +31,8 @@ export class DownloadManager {
   private stateFilePath: string;
   private settingsManager?: SettingsManager;
   private mediaFallbackProvider?: MediaFallbackProvider;
+  private downloadTargets: Map<string, DownloadTarget> = new Map();
+  private resolvedTargetsByPageUrl: Map<string, { target: DownloadTarget; expiresAt: number }> = new Map();
   private lastProgressUpdate: Map<string, number> = new Map();
 
   constructor(
@@ -103,15 +107,17 @@ export class DownloadManager {
       if (typeof url !== 'string' || !YtDlpController.validateUrl(url)) {
         return null;
       }
+      const target = await this.resolveDownloadTarget(url, false);
       try {
-        const info = await this.ytdlp.getVideoInfo(url);
+        const info = await this.ytdlp.getVideoInfo(target.url);
         return {
           ...info,
+          url,
           formats: this.ytdlp.simplifyVideoFormats(info.formats),
         };
       } catch (err: unknown) {
         log.error('Failed to get media info:', getErrorMessage(err));
-        const fallback = this.mediaFallbackProvider?.getMediaFallbackForPage(url);
+        const fallback = target.fallback || this.mediaFallbackProvider?.getMediaFallbackForPage(url);
         if (fallback) {
           return this.getFallbackVideoInfo(url, fallback);
         }
@@ -123,8 +129,9 @@ export class DownloadManager {
       if (typeof url !== 'string' || !YtDlpController.validateUrl(url)) {
         return [];
       }
+      const target = await this.resolveDownloadTarget(url, false);
       try {
-        const info = await this.ytdlp.getVideoInfo(url);
+        const info = await this.ytdlp.getVideoInfo(target.url);
         return this.ytdlp.simplifyVideoFormats(info.formats);
       } catch (err: unknown) {
         log.error('Failed to get formats:', getErrorMessage(err));
@@ -152,6 +159,7 @@ export class DownloadManager {
     ipcMain.handle('download:remove', (_event, id: string) => {
       if (typeof id !== 'string') return false;
       this.downloads.delete(id);
+      this.downloadTargets.delete(id);
       this.saveState();
       return true;
     });
@@ -160,6 +168,7 @@ export class DownloadManager {
       for (const [id, item] of this.downloads) {
         if (item.status === 'completed' || item.status === 'failed') {
           this.downloads.delete(id);
+          this.downloadTargets.delete(id);
         }
       }
       this.saveState();
@@ -169,10 +178,13 @@ export class DownloadManager {
 
   async startDownload(url: string, options?: StartDownloadOptions): Promise<DownloadItem> {
     const id = randomUUID();
+    const target = await this.resolveDownloadTarget(url, true);
+    this.resolvedTargetsByPageUrl.delete(url);
 
     const item: DownloadItem = {
       id,
-      url,
+      url: target.url,
+      sourcePageUrl: target.url !== target.pageUrl ? target.pageUrl : undefined,
       title: options?.title || 'Fetching info...',
       filename: '',
       savePath: '',
@@ -184,13 +196,14 @@ export class DownloadManager {
     };
 
     this.downloads.set(id, item);
+    this.downloadTargets.set(id, target);
     this.notifyUpdate(item);
     this.saveState();
 
     // Fetch video info for title if not provided
     if (!options?.title) {
       try {
-        const info = await this.ytdlp.getVideoInfo(url);
+        const info = await this.ytdlp.getVideoInfo(target.url);
         item.title = info.title;
         item.thumbnail = info.thumbnail;
         this.notifyUpdate(item);
@@ -214,7 +227,7 @@ export class DownloadManager {
 
     if (!nextQueued) return;
 
-    this.executeDownload(nextQueued);
+    this.executeDownload(nextQueued, this.downloadTargets.get(nextQueued.id)?.fallback);
   }
 
   private executeDownload(item: DownloadItem, fallback?: CapturedMediaFallback): void {
@@ -227,6 +240,7 @@ export class DownloadManager {
       log.error('Cannot create download directory:', getErrorMessage(err));
       item.status = 'failed';
       item.error = 'Download directory is not accessible. Check settings.';
+      this.downloadTargets.delete(item.id);
       this.notifyUpdate(item);
       this.processQueue();
       return;
@@ -275,6 +289,7 @@ export class DownloadManager {
       // onComplete
       (filePath: string) => {
         this.lastProgressUpdate.delete(item.id);
+        this.downloadTargets.delete(item.id);
         item.status = 'completed';
         item.progress = 100;
         item.completedAt = Date.now();
@@ -300,7 +315,7 @@ export class DownloadManager {
         }
 
         if (!fallback) {
-          const nextFallback = this.mediaFallbackProvider?.getMediaFallbackForPage(item.url);
+          const nextFallback = this.mediaFallbackProvider?.getMediaFallbackForPage(item.sourcePageUrl || item.url);
           if (nextFallback) {
             log.info(`Retrying download ${item.id} with captured media fallback`);
             item.status = 'queued';
@@ -315,6 +330,7 @@ export class DownloadManager {
         }
 
         item.status = 'failed';
+        this.downloadTargets.delete(item.id);
         item.error = error;
         item.speed = undefined;
         item.eta = undefined;
@@ -376,6 +392,7 @@ export class DownloadManager {
 
     item.status = 'failed';
     item.error = 'Cancelled';
+    this.downloadTargets.delete(item.id);
     item.speed = undefined;
     item.eta = undefined;
     this.notifyUpdate(item);
@@ -508,6 +525,26 @@ export class DownloadManager {
     };
   }
 
+  private async resolveDownloadTarget(pageUrl: string, useCached: boolean): Promise<DownloadTarget> {
+    const cached = this.resolvedTargetsByPageUrl.get(pageUrl);
+    if (useCached && cached && cached.expiresAt > Date.now()) {
+      return cached.target;
+    }
+
+    let target: DownloadTarget;
+    if (this.mediaFallbackProvider) {
+      target = await this.mediaFallbackProvider.resolveDownloadTarget(pageUrl);
+    } else {
+      target = { pageUrl, url: pageUrl, source: 'page' };
+    }
+
+    this.resolvedTargetsByPageUrl.set(pageUrl, {
+      target,
+      expiresAt: Date.now() + RESOLVED_TARGET_TTL_MS,
+    });
+    return target;
+  }
+
   getYtDlpVersion(): string | null {
     return this.ytdlp.getYtDlpVersion();
   }
@@ -519,6 +556,8 @@ export class DownloadManager {
 
   destroy(): void {
     this.ytdlp.cancelAll();
+    this.downloadTargets.clear();
+    this.resolvedTargetsByPageUrl.clear();
     this.saveState();
     this.updateDockBadge();
 

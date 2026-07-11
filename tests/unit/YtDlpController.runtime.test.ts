@@ -74,6 +74,7 @@ describe('YtDlpController binary path resolution', () => {
 
 type DownloadProfile = {
   name: string;
+  impersonate?: string;
   youtubeClient?: string;
   usePotProvider?: boolean;
   useBrowserHeaders?: boolean;
@@ -99,6 +100,13 @@ type ProfileProbe = {
   isAllowedDownloadHeader: (headerName: string) => boolean;
   ytdlpVersion: string | null;
   shouldRetryDownloadWithNextProfile: (url: string, error: string, profile: DownloadProfile) => boolean;
+  withCommonArgs: (
+    args: string[],
+    sourceUrl: string | undefined,
+    profile: DownloadProfile,
+  ) => Promise<{ args: string[]; cleanup: () => void }>;
+  ffmpegPath: string;
+  nodeRuntimePath: string | null;
 };
 
 const profileProbe = (potHome: string | null) => {
@@ -132,16 +140,31 @@ describe('YtDlpController download profile selection', () => {
     expect(names).toEqual(['youtube-public']);
   });
 
-  it('uses the default profile for non-YouTube URLs', () => {
+  it('keeps browser impersonation as a fallback profile for non-YouTube URLs', () => {
     const names = profileProbe('/pot')
       .getDownloadProfiles('https://vimeo.com/123', {})
       .map((p) => p.name);
-    expect(names).toEqual(['browser-context']);
+    expect(names).toEqual(['browser-context', 'browser-impersonated']);
   });
 
   it('uses browser headers for non-YouTube URLs', () => {
     const profiles = profileProbe('/pot').getDownloadProfiles('https://vimeo.com/123', {});
     expect(profiles[0]).toMatchObject({ name: 'browser-context', useBrowserHeaders: true });
+  });
+
+  it('passes the impersonation target to yt-dlp only in the fallback profile', async () => {
+    const p = profileProbe(null);
+    p.ffmpegPath = '/ffmpeg';
+    p.nodeRuntimePath = null;
+
+    const { args, cleanup } = await p.withCommonArgs([], undefined, {
+      name: 'browser-impersonated',
+      impersonate: 'chrome',
+    });
+
+    expect(args).toContain('--impersonate');
+    expect(args).toContain('chrome');
+    cleanup();
   });
 
   it('retries past the pot profile on a recoverable format error', () => {
@@ -158,10 +181,13 @@ describe('YtDlpController download profile selection', () => {
     );
   });
 
-  it('does not retry for non-YouTube downloads', () => {
+  it('retries anti-bot failures once with browser impersonation for non-YouTube downloads', () => {
     const p = profileProbe('/pot');
-    const potProfile = { name: 'youtube-mweb-pot', usePotProvider: true };
-    expect(p.shouldRetryDownloadWithNextProfile('https://vimeo.com/1', 'whatever', potProfile)).toBe(false);
+    const browserProfile = { name: 'browser-context' };
+    expect(
+      p.shouldRetryDownloadWithNextProfile('https://vimeo.com/1', 'HTTP Error 403: Forbidden', browserProfile),
+    ).toBe(true);
+    expect(p.shouldRetryDownloadWithNextProfile('https://vimeo.com/1', 'Unsupported URL', browserProfile)).toBe(false);
   });
 });
 

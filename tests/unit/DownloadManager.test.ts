@@ -33,6 +33,7 @@ vi.mock('fs', async () => {
 });
 
 import { DownloadManager } from '../../src/main/download/DownloadManager';
+import type { MediaFallbackProvider } from '../../src/main/download/MediaFallbackProvider';
 
 describe('DownloadManager', () => {
   let manager: DownloadManager;
@@ -80,6 +81,54 @@ describe('DownloadManager', () => {
     it('notifies renderer of new download', async () => {
       await manager.startDownload('https://youtube.com/watch?v=test', { title: 'Test' });
       expect(mockSender.send).toHaveBeenCalled();
+    });
+
+    it('stores the resolved target while retaining the source page for fallback context', async () => {
+      const provider: MediaFallbackProvider = {
+        resolveDownloadTarget: vi.fn(async (pageUrl: string) => ({
+          pageUrl,
+          url: 'https://www.instagram.com/reel/active123/',
+          source: 'permalink',
+        })),
+        getMediaFallbackForPage: vi.fn(() => null),
+      };
+      const mgr = new DownloadManager(mockSender, undefined, provider);
+
+      const item = await mgr.startDownload('https://www.instagram.com/explore/', { title: 'Active reel' });
+
+      expect(item.url).toBe('https://www.instagram.com/reel/active123/');
+      expect(item.sourcePageUrl).toBe('https://www.instagram.com/explore/');
+      expect(provider.resolveDownloadTarget).toHaveBeenCalledWith('https://www.instagram.com/explore/');
+      mgr.destroy();
+    });
+
+    it('downloads the same target that was resolved for the metadata dialog', async () => {
+      const pageUrl = 'https://www.instagram.com/explore/';
+      const provider: MediaFallbackProvider = {
+        resolveDownloadTarget: vi.fn(async () => ({
+          pageUrl,
+          url: 'https://www.instagram.com/reel/active123/',
+          source: 'permalink',
+        })),
+        getMediaFallbackForPage: vi.fn(() => null),
+      };
+      const mgr = new DownloadManager(mockSender, undefined, provider);
+      const controller = (mgr as unknown as { ytdlp: Record<string, unknown> }).ytdlp;
+      controller.getVideoInfo = vi.fn(async (url: string) => ({
+        id: 'active123',
+        title: 'Active reel',
+        url,
+        formats: [],
+      }));
+      controller.simplifyVideoFormats = vi.fn(() => []);
+      const handlers = (ipcMain as unknown as { _handlers: Map<string, (...args: unknown[]) => unknown> })._handlers;
+
+      await handlers.get('media:get-info')?.({}, pageUrl);
+      const item = await mgr.startDownload(pageUrl, { title: 'Active reel' });
+
+      expect(item.url).toBe('https://www.instagram.com/reel/active123/');
+      expect(provider.resolveDownloadTarget).toHaveBeenCalledTimes(1);
+      mgr.destroy();
     });
   });
 
