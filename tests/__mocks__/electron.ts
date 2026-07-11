@@ -66,7 +66,12 @@ vi.mock('electron', () => {
     WebContentsView: vi.fn(),
     session: {
       defaultSession: {
-        webRequest: { onHeadersReceived: vi.fn() },
+        webRequest: {
+          onBeforeSendHeaders: vi.fn(),
+          onHeadersReceived: vi.fn(),
+          onResponseStarted: vi.fn(),
+          onErrorOccurred: vi.fn(),
+        },
       },
     },
     Menu: {

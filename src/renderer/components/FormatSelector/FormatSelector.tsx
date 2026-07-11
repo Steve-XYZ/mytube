@@ -18,6 +18,7 @@ export function FormatSelector({ url, onClose, onDownload }: FormatSelectorProps
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string>('best');
+  const hasSelectableVideoFormats = formats.some((format) => format.hasVideo);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,7 +131,9 @@ export function FormatSelector({ url, onClose, onDownload }: FormatSelectorProps
                     checked={selectedFormat === 'best'}
                     onChange={() => setSelectedFormat('best')}
                   />
-                  <span className="format-option-label">Best Quality (MP4)</span>
+                  <span className="format-option-label">
+                    {hasSelectableVideoFormats ? 'Best Available Quality' : 'Original Detected Quality'}
+                  </span>
                 </label>
 
                 {formats

@@ -26,6 +26,18 @@ export function getManagedYtDlpPath(managedDir: string, platform: NodeJS.Platfor
   return path.join(managedDir, platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
 }
 
+export function readManagedYtDlpVersion(managedDir: string): string | null {
+  try {
+    const raw = fs.readFileSync(path.join(managedDir, 'update-state.json'), 'utf-8');
+    const state = JSON.parse(raw) as UpdaterState;
+    return typeof state.version === 'string' && /^\d{4}\.\d{2}\.\d{2}(?:\.\d+)?$/.test(state.version)
+      ? state.version
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Compare date-based yt-dlp versions like "2026.06.09" or "2026.06.09.1". */
 export function compareYtDlpVersions(a: string, b: string): number {
   const partsA = a.split('.').map((part) => Number.parseInt(part, 10) || 0);
@@ -143,8 +155,17 @@ export class YtDlpUpdater {
 
     const currentVersion = this.currentVersionProvider();
     if (currentVersion && compareYtDlpVersions(latestVersion, currentVersion) <= 0) {
-      log.info(`yt-dlp is up to date (${currentVersion})`);
-      return { status: 'up-to-date', version: currentVersion };
+      const managedPath = getManagedYtDlpPath(this.managedDir, this.platform);
+      const managedStateVersion = readManagedYtDlpVersion(this.managedDir);
+      if (
+        !managedStateVersion ||
+        !fs.existsSync(managedPath) ||
+        this.probeBinaryVersion(managedPath) === currentVersion
+      ) {
+        log.info(`yt-dlp is up to date (${currentVersion})`);
+        return { status: 'up-to-date', version: currentVersion };
+      }
+      log.warn(`Managed yt-dlp ${currentVersion} failed its background version probe; reinstalling it`);
     }
 
     const assetName = this.assetName();

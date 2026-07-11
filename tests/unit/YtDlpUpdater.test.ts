@@ -10,6 +10,7 @@ import {
   parseChecksumManifest,
   getManagedYtDlpDir,
   getManagedYtDlpPath,
+  readManagedYtDlpVersion,
 } from '../../src/main/download/YtDlpUpdater';
 
 const LATEST_VERSION = '2099.01.01';
@@ -112,6 +113,21 @@ describe('YtDlpUpdater', () => {
     expect(fs.existsSync(getManagedYtDlpPath(managedDir, 'linux'))).toBe(false);
   });
 
+  it('reinstalls an up-to-date managed binary when its background probe fails', async () => {
+    const managedPath = getManagedYtDlpPath(managedDir, 'linux');
+    fs.writeFileSync(managedPath, '#!/bin/sh\necho 1999.01.01\n', { mode: 0o755 });
+    fs.writeFileSync(
+      path.join(managedDir, 'update-state.json'),
+      JSON.stringify({ version: LATEST_VERSION, lastCheckAt: 0 }),
+    );
+    const updater = makeUpdater({ currentVersionProvider: () => LATEST_VERSION });
+
+    const result = await updater.checkAndUpdate();
+
+    expect(result).toEqual({ status: 'updated', version: LATEST_VERSION });
+    expect(fs.readFileSync(managedPath, 'utf-8')).toBe(BINARY_CONTENT);
+  });
+
   it('updates even when the current version is unknown', async () => {
     const updater = makeUpdater({ currentVersionProvider: () => null });
 
@@ -206,5 +222,18 @@ describe('managed path helpers', () => {
   it('appends .exe on Windows only', () => {
     expect(getManagedYtDlpPath('/managed', 'win32')).toBe(path.join('/managed', 'yt-dlp.exe'));
     expect(getManagedYtDlpPath('/managed', 'darwin')).toBe(path.join('/managed', 'yt-dlp'));
+  });
+
+  it('reads only a valid installed version from updater state', () => {
+    const managedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytdlp-state-test-'));
+    try {
+      fs.writeFileSync(path.join(managedDir, 'update-state.json'), JSON.stringify({ version: '2026.07.04' }));
+      expect(readManagedYtDlpVersion(managedDir)).toBe('2026.07.04');
+
+      fs.writeFileSync(path.join(managedDir, 'update-state.json'), JSON.stringify({ version: '../invalid' }));
+      expect(readManagedYtDlpVersion(managedDir)).toBeNull();
+    } finally {
+      fs.rmSync(managedDir, { recursive: true, force: true });
+    }
   });
 });
