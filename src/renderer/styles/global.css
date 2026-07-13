@@ -1,45 +1,85 @@
+/*
+ * MyTube design tokens.
+ * Dark is the flagship look (brand gradient + near-black surfaces); the light
+ * theme mirrors every token so components only ever reference variables.
+ */
 :root {
   --bg-primary: #ffffff;
-  --bg-secondary: #f5f5f5;
-  --bg-hover: rgba(0, 0, 0, 0.06);
-  --border-color: #e0e0e0;
-  --text-primary: #1a1a1a;
-  --text-secondary: #666666;
-  --text-tertiary: #999999;
-  --accent-color: #4a90d9;
-  --accent-color-alpha: rgba(74, 144, 217, 0.25);
+  --bg-secondary: #f4f4f7;
+  --bg-elevated: #ffffff;
+  --bg-hover: rgba(20, 20, 30, 0.06);
+  --bg-active: rgba(20, 20, 30, 0.1);
+  --border-color: #e4e4ec;
+  --border-strong: #d2d2dd;
+  --text-primary: #17171c;
+  --text-secondary: #5d5d68;
+  --text-tertiary: #9a9aa4;
+  --accent-color: #e91e4f;
+  --accent-color-strong: #c91340;
+  --accent-color-alpha: rgba(233, 30, 79, 0.18);
+  --accent-gradient: linear-gradient(135deg, #ff4757 0%, #e91e63 100%);
+  --accent-contrast: #ffffff;
+  --accent-glow: 0 4px 14px rgba(233, 30, 79, 0.3);
   --danger-color: #e74c3c;
   --success-color: #27ae60;
+  --warning-color: #f5a623;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+  --shadow-card: 0 1px 3px rgba(10, 10, 20, 0.08);
+  --shadow-panel: 0 12px 40px rgba(10, 10, 20, 0.22);
+  --focus-ring: 0 0 0 2px var(--accent-color-alpha);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg-primary: #1e1e1e;
-    --bg-secondary: #2d2d2d;
-    --bg-hover: rgba(255, 255, 255, 0.08);
-    --border-color: #3e3e3e;
-    --text-primary: #e0e0e0;
-    --text-secondary: #999999;
-    --text-tertiary: #666666;
-    --accent-color: #5ba0e0;
-    --accent-color-alpha: rgba(91, 160, 224, 0.25);
-    --danger-color: #e74c3c;
+    --bg-primary: #0e0e14;
+    --bg-secondary: #14141c;
+    --bg-elevated: #1a1a24;
+    --bg-hover: rgba(255, 255, 255, 0.07);
+    --bg-active: rgba(255, 255, 255, 0.11);
+    --border-color: #24242f;
+    --border-strong: #32323f;
+    --text-primary: #f2f2f6;
+    --text-secondary: #9c9cab;
+    --text-tertiary: #626270;
+    --accent-color: #ff3d63;
+    --accent-color-strong: #ff5d7d;
+    --accent-color-alpha: rgba(255, 61, 99, 0.22);
+    --accent-gradient: linear-gradient(135deg, #ff4757 0%, #ff2d78 100%);
+    --accent-contrast: #ffffff;
+    --accent-glow: 0 4px 18px rgba(255, 45, 105, 0.4);
+    --danger-color: #ff5c4d;
     --success-color: #2ecc71;
+    --warning-color: #f7b731;
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --shadow-panel: 0 16px 48px rgba(0, 0, 0, 0.55);
   }
 }
 
 :root[data-theme="dark"] {
-  --bg-primary: #1e1e1e;
-  --bg-secondary: #2d2d2d;
-  --bg-hover: rgba(255, 255, 255, 0.08);
-  --border-color: #3e3e3e;
-  --text-primary: #e0e0e0;
-  --text-secondary: #999999;
-  --text-tertiary: #666666;
-  --accent-color: #5ba0e0;
-  --accent-color-alpha: rgba(91, 160, 224, 0.25);
-  --danger-color: #e74c3c;
+  --bg-primary: #0e0e14;
+  --bg-secondary: #14141c;
+  --bg-elevated: #1a1a24;
+  --bg-hover: rgba(255, 255, 255, 0.07);
+  --bg-active: rgba(255, 255, 255, 0.11);
+  --border-color: #24242f;
+  --border-strong: #32323f;
+  --text-primary: #f2f2f6;
+  --text-secondary: #9c9cab;
+  --text-tertiary: #626270;
+  --accent-color: #ff3d63;
+  --accent-color-strong: #ff5d7d;
+  --accent-color-alpha: rgba(255, 61, 99, 0.22);
+  --accent-gradient: linear-gradient(135deg, #ff4757 0%, #ff2d78 100%);
+  --accent-contrast: #ffffff;
+  --accent-glow: 0 4px 18px rgba(255, 45, 105, 0.4);
+  --danger-color: #ff5c4d;
   --success-color: #2ecc71;
+  --warning-color: #f7b731;
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-panel: 0 16px 48px rgba(0, 0, 0, 0.55);
 }
 
 * {
@@ -63,6 +103,14 @@ html, body, #root {
   flex-direction: column;
 }
 
+/* Row below the header: sidebar on the left, transparent gap on the right
+   where the main process overlays the web content view. */
+.app-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
 button {
   font-family: inherit;
 }
@@ -82,10 +130,10 @@ a {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--text-tertiary);
+  background: var(--border-strong);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-secondary);
+  background: var(--text-tertiary);
 }

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { TabBar } from './components/TabBar/TabBar';
 import { NavigationBar } from './components/NavigationBar/NavigationBar';
+import { Sidebar } from './components/Sidebar/Sidebar';
 import { FindBar } from './components/FindBar/FindBar';
 import { DownloadPanel } from './components/DownloadPanel/DownloadPanel';
 import { FormatSelector } from './components/FormatSelector/FormatSelector';
@@ -175,6 +176,17 @@ export default function App() {
         onSettingsClick={handleSettingsClick}
         mediaState={mediaState}
       />
+      <div className="app-body">
+        <Sidebar
+          activeTab={activeTab}
+          historyPanelVisible={historyPanelVisible}
+          downloadPanelVisible={downloadPanelVisible}
+          settingsVisible={settingsVisible}
+          onToggleHistoryPanel={() => setHistoryPanelVisible((prev) => !prev)}
+          onToggleDownloadPanel={handleToggleDownloadPanel}
+          onSettingsClick={handleSettingsClick}
+        />
+      </div>
       <FindBar visible={findVisible} onClose={() => setFindVisible(false)} />
       <DownloadPanel visible={downloadPanelVisible} onClose={() => setDownloadPanelVisible(false)} />
       <HistoryPanel visible={historyPanelVisible} onClose={() => setHistoryPanelVisible(false)} />

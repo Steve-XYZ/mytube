@@ -14,10 +14,10 @@
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  border-radius: 8px;
-  background: var(--bg-primary);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
   border: 1px solid var(--border-color);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-panel);
   font-size: 13px;
   color: var(--text-primary);
   pointer-events: auto;
@@ -74,8 +74,8 @@
 }
 
 .toast-info .toast-icon {
-  background: var(--accent-color);
-  color: white;
+  background: var(--accent-gradient);
+  color: var(--accent-contrast);
 }
 
 .toast-text {

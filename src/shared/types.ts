@@ -198,5 +198,6 @@ export interface AppSettings {
     homepage: string;
     searchEngine: 'google' | 'duckduckgo' | 'bing';
     restoreSession: boolean;
+    sidebarCollapsed: boolean;
   };
 }

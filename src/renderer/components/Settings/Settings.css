@@ -10,13 +10,14 @@
 
 .settings-panel {
   background: var(--bg-primary);
-  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
   width: 640px;
   max-width: 90vw;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-panel);
   overflow: hidden;
 }
 
@@ -282,7 +283,7 @@
 }
 
 .settings-toggle input:checked + .settings-toggle-slider {
-  background: var(--accent-color);
+  background: var(--accent-gradient);
 }
 
 .settings-toggle input:checked + .settings-toggle-slider::before {

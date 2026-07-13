@@ -26,13 +26,17 @@
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   transition: background 0.15s, color 0.15s;
 }
 
 .nav-btn:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.nav-btn:active:not(:disabled) {
+  background: var(--bg-active);
 }
 
 .nav-btn:disabled {
@@ -51,14 +55,20 @@
   height: 34px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 0 12px;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  border-radius: var(--radius-pill);
+  padding: 0 14px;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
 }
 
-.url-bar-focused {
+.url-bar:hover {
+  border-color: var(--border-strong);
+}
+
+.url-bar-focused,
+.url-bar-focused:hover {
   border-color: var(--accent-color);
-  box-shadow: 0 0 0 2px var(--accent-color-alpha);
+  background: var(--bg-primary);
+  box-shadow: var(--focus-ring);
 }
 
 .url-lock {
@@ -97,22 +107,24 @@
 }
 
 .nav-btn-star-active {
-  color: #f5a623;
+  color: var(--warning-color);
 }
 
 .nav-btn-star-active:hover {
-  color: #f5a623;
+  color: var(--warning-color);
   filter: brightness(1.1);
 }
 
 .nav-btn-download-active {
-  color: var(--accent-color);
-  background: var(--accent-color-alpha);
+  background: var(--accent-gradient);
+  color: var(--accent-contrast);
+  box-shadow: var(--accent-glow);
 }
 
-.nav-btn-download-active:hover {
-  color: var(--accent-color);
-  filter: brightness(1.1);
+.nav-btn-download-active:hover:not(:disabled) {
+  background: var(--accent-gradient);
+  color: var(--accent-contrast);
+  filter: brightness(1.08);
 }
 
 .nav-btn-download-idle {
@@ -126,7 +138,7 @@
 .nav-btn-spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid var(--border-color);
+  border: 2px solid var(--border-strong);
   border-top-color: var(--accent-color);
   border-radius: 50%;
   animation: nav-spin 0.8s linear infinite;
@@ -150,7 +162,7 @@
 
 .nav-loading-bar-progress {
   height: 100%;
-  background: var(--accent-color);
+  background: var(--accent-gradient);
   animation: nav-loading 2s ease-in-out infinite;
   transform-origin: left;
 }

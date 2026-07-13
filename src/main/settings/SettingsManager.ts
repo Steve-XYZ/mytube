@@ -26,6 +26,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     homepage: 'mytube://newtab',
     searchEngine: 'google',
     restoreSession: true,
+    sidebarCollapsed: false,
   },
 };
 

@@ -8,7 +8,8 @@ test.describe('settings', () => {
     try {
       const { shell } = launched;
 
-      await shell.getByTitle('Settings').click();
+      // Both the nav bar and the sidebar expose a "Settings" control.
+      await shell.locator('.nav-bar').getByTitle('Settings').click();
       await expect(shell.locator('.settings-panel')).toBeVisible();
 
       const themeSelect = shell.locator('.settings-row', { hasText: 'Theme' }).locator('select');

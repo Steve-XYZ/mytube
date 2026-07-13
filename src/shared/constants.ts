@@ -10,3 +10,8 @@ export const MIN_WINDOW_HEIGHT = 600;
 export const TAB_BAR_HEIGHT = 40;
 export const NAV_BAR_HEIGHT = 48;
 export const HEADER_HEIGHT = TAB_BAR_HEIGHT + NAV_BAR_HEIGHT;
+
+// The web content view is offset by the sidebar; both processes must agree on
+// these widths (renderer draws the sidebar, main positions the content view).
+export const SIDEBAR_WIDTH_EXPANDED = 200;
+export const SIDEBAR_WIDTH_COLLAPSED = 64;
