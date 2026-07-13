@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { launchApp, type LaunchedApp } from './helpers/app';
+import { launchApp, waitForPage, type LaunchedApp } from './helpers/app';
+import { startTestServer } from './helpers/server';
 
 test.describe('tab management', () => {
   let launched: LaunchedApp;
@@ -47,5 +48,56 @@ test.describe('tab management', () => {
     await expect(tabs).toHaveCount(1);
     await expect(tabs.first()).toHaveClass(/tab-active/);
     await expect(tabs.first().locator('.tab-title')).toHaveText('MyTube');
+  });
+
+  test('preserves the opener for OAuth popups and closes the child without adding a tab', async () => {
+    const server = await startTestServer();
+    try {
+      const openerUrl = `${server.baseUrl}/oauth-opener`;
+      await launched.shell.locator('.url-input').fill(openerUrl);
+      await launched.shell.locator('.url-input').press('Enter');
+      const opener = await waitForPage(launched.app, (url) => url === openerUrl);
+
+      await opener.locator('#login').click();
+
+      await expect(opener.locator('#result')).toHaveText('completed');
+      await expect(launched.shell.locator('.tab')).toHaveCount(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test('preserves OAuth context when the provider starts from about:blank', async () => {
+    const server = await startTestServer();
+    try {
+      const openerUrl = `${server.baseUrl}/oauth-opener`;
+      await launched.shell.locator('.url-input').fill(openerUrl);
+      await launched.shell.locator('.url-input').press('Enter');
+      const opener = await waitForPage(launched.app, (url) => url === openerUrl);
+
+      await opener.locator('#login-blank').click();
+
+      await expect(opener.locator('#result')).toHaveText('completed');
+      await expect(launched.shell.locator('.tab')).toHaveCount(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test('keeps ordinary target-blank links in the managed tab bar', async () => {
+    const server = await startTestServer();
+    try {
+      const openerUrl = `${server.baseUrl}/tab-opener`;
+      await launched.shell.locator('.url-input').fill(openerUrl);
+      await launched.shell.locator('.url-input').press('Enter');
+      const opener = await waitForPage(launched.app, (url) => url === openerUrl);
+
+      await opener.locator('#open-tab').click();
+
+      await expect(launched.shell.locator('.tab')).toHaveCount(2);
+      await waitForPage(launched.app, (url) => url === `${server.baseUrl}/b`);
+    } finally {
+      await server.close();
+    }
   });
 });

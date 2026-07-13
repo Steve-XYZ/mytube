@@ -53,6 +53,58 @@ const PAGES: Record<string, string> = {
     <img src="/img/small.png" width="10" height="10" alt="tiny">
   </body>
 </html>`,
+  '/media-feed': `<!doctype html>
+<html>
+  <head><title>E2E Media Feed</title></head>
+  <body>
+    <h1 id="heading">Media Feed</h1>
+    <a id="active-media-link" href="https://www.instagram.com/reel/e2eactive/">
+      <video id="active-video" src="/media/feed.mp4" width="640" height="360" muted autoplay controls></video>
+    </a>
+  </body>
+</html>`,
+  '/oauth-opener': `<!doctype html>
+<html>
+  <head><title>OAuth opener</title></head>
+  <body>
+    <button id="login">Log in</button>
+    <button id="login-blank">Log in from blank popup</button>
+    <p id="result">waiting</p>
+    <script>
+      addEventListener('message', (event) => {
+        if (event.origin === location.origin && event.data === 'oauth-success') {
+          document.getElementById('result').textContent = 'completed';
+        }
+      });
+      document.getElementById('login').addEventListener('click', () => {
+        window.open('/oauth-popup', 'oauth', 'width=500,height=600');
+      });
+      document.getElementById('login-blank').addEventListener('click', () => {
+        const popup = window.open('about:blank', 'oauth-blank', 'width=500,height=600');
+        if (popup) popup.location.href = '/oauth-popup';
+      });
+    </script>
+  </body>
+</html>`,
+  '/oauth-popup': `<!doctype html>
+<html>
+  <head><title>OAuth provider</title></head>
+  <body>
+    <script>
+      if (window.opener) {
+        window.opener.postMessage('oauth-success', location.origin);
+        setTimeout(() => window.close(), 100);
+      }
+    </script>
+  </body>
+</html>`,
+  '/tab-opener': `<!doctype html>
+<html>
+  <head><title>Tab opener</title></head>
+  <body>
+    <a id="open-tab" href="/b" target="_blank">Open tab</a>
+  </body>
+</html>`,
 };
 
 let imageCache: Record<string, Buffer> | null = null;
@@ -75,6 +127,13 @@ export async function startTestServer(): Promise<TestServer> {
     if (image) {
       res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': image.length });
       res.end(image);
+      return;
+    }
+
+    if (url.pathname === '/media/feed.mp4') {
+      const media = Buffer.alloc(4096);
+      res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': media.length });
+      res.end(media);
       return;
     }
 

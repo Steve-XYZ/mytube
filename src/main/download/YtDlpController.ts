@@ -6,7 +6,7 @@ import { app, session, type Cookie } from 'electron';
 import { VideoInfo, VideoFormat } from '../../shared/types';
 import log from 'electron-log/main';
 import { classifyMediaUrl } from './MediaUrlClassifier';
-import { getManagedYtDlpDir, getManagedYtDlpPath } from './YtDlpUpdater';
+import { getManagedYtDlpDir, getManagedYtDlpPath, readManagedYtDlpVersion } from './YtDlpUpdater';
 
 export interface DownloadOptions {
   formatId?: string;
@@ -60,6 +60,7 @@ interface YtDlpJson {
 
 interface YtDlpExecutionProfile {
   name: string;
+  impersonate?: string;
   youtubeClient?: 'mweb';
   usePotProvider?: boolean;
   useYouTubeCookies?: boolean;
@@ -117,9 +118,9 @@ export class YtDlpController {
   }
 
   /**
-   * Prefer a runtime-updated yt-dlp from the managed updates directory over
-   * the bundled snapshot, falling back to the bundled binary when the managed
-   * one is missing or broken. MYTUBE_BIN_DIR pins the binary for tests.
+   * Prefer a checksum-verified runtime update without synchronously launching
+   * it on the main thread. The updater performs a slower background probe and
+   * repairs a damaged managed binary. MYTUBE_BIN_DIR pins the binary for tests.
    */
   private initializeYtDlpBinary(): void {
     const bundledPath = this.resolveBinaryPath('yt-dlp');
@@ -127,17 +128,17 @@ export class YtDlpController {
     this.binariesAvailable = fs.existsSync(bundledPath);
 
     if (!process.env.MYTUBE_BIN_DIR) {
-      const managedPath = getManagedYtDlpPath(getManagedYtDlpDir(app.getPath('userData')));
+      const managedDir = getManagedYtDlpDir(app.getPath('userData'));
+      const managedPath = getManagedYtDlpPath(managedDir);
       if (fs.existsSync(managedPath)) {
-        YtDlpController.ytdlpVersionCache.delete(managedPath);
-        const managedVersion = this.detectYtDlpVersion(managedPath);
+        const managedVersion = readManagedYtDlpVersion(managedDir) || this.detectYtDlpVersion(managedPath);
         if (managedVersion) {
           this.ytdlpPath = managedPath;
           this.binariesAvailable = true;
           this.ytdlpVersion = managedVersion;
           return;
         }
-        log.warn(`Managed yt-dlp update at ${managedPath} failed version probe; using bundled binary`);
+        log.warn(`Managed yt-dlp update at ${managedPath} has no valid state or version; using bundled binary`);
       }
     }
 
@@ -348,6 +349,9 @@ export class YtDlpController {
         output = await this.execYtDlp(['--dump-json', '--no-playlist', '--no-warnings', url], url, profile);
         break;
       } catch (err: unknown) {
+        if (profile.impersonate && lastError && this.isImpersonationUnavailable(this.getErrorMessage(err))) {
+          break;
+        }
         lastError = err;
         if (!this.shouldTryNextProfile(url, err, profile)) {
           break;
@@ -434,6 +438,9 @@ export class YtDlpController {
         return;
       }
 
+      if (profile.impersonate && lastError !== 'Download failed' && this.isImpersonationUnavailable(outcome.error)) {
+        break;
+      }
       lastError = outcome.error;
       if (!isLastProfile && this.shouldRetryDownloadWithNextProfile(url, outcome.error, profile)) {
         log.warn(`Download ${downloadId} profile "${profile.name}" failed; retrying with fallback profile`);
@@ -700,6 +707,9 @@ export class YtDlpController {
     if (this.nodeRuntimePath) {
       commonArgs.push('--js-runtimes', `node:${this.nodeRuntimePath}`);
     }
+    if (profile.impersonate) {
+      commonArgs.push('--impersonate', profile.impersonate);
+    }
 
     const headers = new Map<string, string>();
     const setHeader = (name: string, value?: string) => {
@@ -758,7 +768,10 @@ export class YtDlpController {
 
   private getExtractionProfiles(sourceUrl: string): YtDlpExecutionProfile[] {
     if (!this.isYouTubeUrl(sourceUrl)) {
-      return [{ name: 'browser-context', useBrowserHeaders: true }];
+      return [
+        { name: 'browser-context', useBrowserHeaders: true },
+        { name: 'browser-impersonated', useBrowserHeaders: true, impersonate: 'chrome' },
+      ];
     }
 
     const profiles: YtDlpExecutionProfile[] = [
@@ -792,7 +805,10 @@ export class YtDlpController {
    */
   private getDownloadProfiles(sourceUrl: string, options: DownloadOptions): YtDlpExecutionProfile[] {
     if (!this.isYouTubeUrl(sourceUrl)) {
-      return [{ name: 'browser-context', useBrowserHeaders: true }];
+      return [
+        { name: 'browser-context', useBrowserHeaders: true },
+        { name: 'browser-impersonated', useBrowserHeaders: true, impersonate: 'chrome' },
+      ];
     }
 
     const profiles: YtDlpExecutionProfile[] = [];
@@ -814,6 +830,10 @@ export class YtDlpController {
     error: string,
     profile: YtDlpExecutionProfile,
   ): boolean {
+    if (!this.isYouTubeUrl(sourceUrl)) {
+      return !profile.impersonate && this.isAntiBotError(error);
+    }
+
     // Only worth falling back from the mweb/PO-token profile; the public profile
     // is already the most permissive option.
     if (!this.isYouTubeUrl(sourceUrl) || !profile.usePotProvider) {
@@ -832,6 +852,10 @@ export class YtDlpController {
   }
 
   private shouldTryNextProfile(sourceUrl: string, err: unknown, profile: YtDlpExecutionProfile): boolean {
+    if (!this.isYouTubeUrl(sourceUrl)) {
+      return !profile.impersonate && this.isAntiBotError(this.getErrorMessage(err));
+    }
+
     if (!this.isYouTubeUrl(sourceUrl) || !this.potProviderServerHome || profile.usePotProvider) {
       return false;
     }
@@ -908,6 +932,10 @@ export class YtDlpController {
     return /captcha|cloudflare|too many requests|http error 429|http error 403|forbidden|blocked|not a bot/i.test(
       message,
     );
+  }
+
+  private isImpersonationUnavailable(message: string): boolean {
+    return /impersonat(?:e|ion).*not available|no impersonate target|unsupported impersonation/i.test(message);
   }
 
   private isDrmError(message: string): boolean {

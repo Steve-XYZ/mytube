@@ -22,6 +22,7 @@ export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'completed' |
 export interface DownloadItem {
   id: string;
   url: string;
+  sourcePageUrl?: string;
   title: string;
   filename: string;
   savePath: string;

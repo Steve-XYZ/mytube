@@ -1,4 +1,15 @@
-import { app, BaseWindow, WebContentsView, ipcMain, session, Menu, MenuItem, clipboard, dialog } from 'electron';
+import {
+  app,
+  BaseWindow,
+  WebContentsView,
+  ipcMain,
+  session,
+  Menu,
+  MenuItem,
+  clipboard,
+  dialog,
+  type BrowserWindow,
+} from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { TabInfo, IPC_CHANNELS, FindInPageResult } from '../../shared/types';
@@ -12,6 +23,12 @@ import type { SettingsManager } from '../settings/SettingsManager';
 import { writeFileAtomic } from '../utils/fsAtomic';
 import { YtDlpController } from '../download/YtDlpController';
 import { isDirectMediaResourceUrl, isLikelyMediaUrl } from '../download/MediaUrlClassifier';
+import {
+  rankCapturedMediaCandidates,
+  resolveDownloadTarget as selectDownloadTarget,
+  type ActiveMediaSnapshot,
+  type DownloadTarget,
+} from '../download/DownloadTargetResolver';
 import type { CapturedMediaFallback, MediaFallbackProvider } from '../download/MediaFallbackProvider';
 import type { MediaDetector } from '../media/MediaDetector';
 import log from 'electron-log/main';
@@ -28,13 +45,22 @@ const TAB_SUSPEND_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_TABS = 20;
 const SESSION_SAVE_DEBOUNCE_MS = 1000;
 const MAX_CAPTURED_MEDIA_PER_TAB = 20;
+const MAX_PENDING_MEDIA_REQUESTS = 200;
 const CAPTURED_MEDIA_TTL_MS = 10 * 60 * 1000;
 
 interface MediaRequestDetails {
+  id: number;
   webContentsId?: number;
   url: string;
   resourceType?: string;
   requestHeaders?: Record<string, string | string[]>;
+  responseHeaders?: Record<string, string[]>;
+  statusCode?: number;
+}
+
+interface PendingMediaRequest {
+  fallback: CapturedMediaFallback;
+  navigationId: number;
 }
 
 /** Receives main-frame navigations for the browsing history. */
@@ -58,6 +84,9 @@ export class TabManager implements MediaFallbackProvider {
   private activeTabId: string | null = null;
   private tabIdsByWebContentsId: Map<number, string> = new Map();
   private capturedMediaByTabId: Map<string, CapturedMediaFallback[]> = new Map();
+  private pendingMediaRequests: Map<number, PendingMediaRequest> = new Map();
+  private navigationIdsByTabId: Map<string, number> = new Map();
+  private popupWindows: Set<BrowserWindow> = new Set();
   private window: BaseWindow;
   private appView: WebContentsView;
   private nextTabId = 1;
@@ -142,6 +171,12 @@ export class TabManager implements MediaFallbackProvider {
       this.captureMediaRequest(details);
       callback({ requestHeaders: details.requestHeaders || {} });
     });
+    session.defaultSession.webRequest.onResponseStarted((details: MediaRequestDetails) => {
+      this.captureMediaResponse(details);
+    });
+    session.defaultSession.webRequest.onErrorOccurred((details: MediaRequestDetails) => {
+      this.pendingMediaRequests.delete(details.id);
+    });
   }
 
   // ==================== Tab Lifecycle ====================
@@ -195,6 +230,7 @@ export class TabManager implements MediaFallbackProvider {
     const managedTab: ManagedTab = { id: tabId, view, info: tabInfo, lastActiveAt: Date.now() };
     this.tabs.set(tabId, managedTab);
     this.tabIdsByWebContentsId.set(view.webContents.id, tabId);
+    this.navigationIdsByTabId.set(tabId, 0);
 
     this.setupTabEvents(managedTab);
     this.setupContextMenu(managedTab);
@@ -294,6 +330,7 @@ export class TabManager implements MediaFallbackProvider {
     this.mediaDetector?.unregisterTabWebContents(tab.view.webContents.id);
     this.tabIdsByWebContentsId.delete(tab.view.webContents.id);
     this.capturedMediaByTabId.delete(tabId);
+    this.navigationIdsByTabId.delete(tabId);
     tab.view.webContents.close();
     this.tabs.delete(tabId);
 
@@ -311,6 +348,15 @@ export class TabManager implements MediaFallbackProvider {
     }
 
     return true;
+  }
+
+  private isAllowedPopupUrl(url: string): boolean {
+    try {
+      const parsed = new URL(url);
+      return ['http:', 'https:', 'blob:'].includes(parsed.protocol) || url === 'about:blank';
+    } catch {
+      return false;
+    }
   }
 
   switchTab(tabId: string): boolean {
@@ -571,11 +617,36 @@ export class TabManager implements MediaFallbackProvider {
     });
 
     // Handle new window requests (popups, target=_blank)
-    wc.setWindowOpenHandler(({ url: newUrl }) => {
-      if (newUrl && newUrl !== 'about:blank' && this.isAllowedUrl(newUrl)) {
-        this.createTab(newUrl);
+    wc.setWindowOpenHandler(({ url: newUrl, disposition, postBody }) => {
+      if (!this.isAllowedPopupUrl(newUrl) || this.tabs.size + this.popupWindows.size >= MAX_TABS) {
+        return { action: 'deny' };
       }
-      return { action: 'deny' };
+
+      if ((disposition === 'foreground-tab' || disposition === 'background-tab') && !postBody) {
+        this.createTab(newUrl);
+        return { action: 'deny' };
+      }
+
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          autoHideMenuBar: true,
+          webPreferences: {
+            sandbox: true,
+            contextIsolation: true,
+            nodeIntegration: false,
+            preload: undefined,
+            plugins: true,
+            webgl: true,
+          },
+        },
+      };
+    });
+
+    wc.on('did-create-window', (popup, details) => {
+      this.popupWindows.add(popup);
+      popup.once('closed', () => this.popupWindows.delete(popup));
+      log.info(`Popup window created from ${info.id}: ${this.redactUrlForLog(details.url)}`);
     });
 
     // Handle certificate errors gracefully
@@ -753,22 +824,29 @@ export class TabManager implements MediaFallbackProvider {
     return tab?.view.webContents;
   }
 
-  getMediaFallbackForPage(pageUrl: string): CapturedMediaFallback | null {
-    const normalizedPageUrl = this.normalizeComparableUrl(pageUrl);
-    const now = Date.now();
+  async resolveDownloadTarget(pageUrl: string): Promise<DownloadTarget> {
+    const tab = this.findTabForPage(pageUrl);
+    const capturedCandidates = tab ? this.getCapturedMediaCandidates(tab.id) : [];
+    let snapshot: ActiveMediaSnapshot | null = null;
 
-    for (const tab of this.tabs.values()) {
-      if (this.normalizeComparableUrl(tab.info.url) !== normalizedPageUrl) continue;
-
-      const candidates = (this.capturedMediaByTabId.get(tab.id) || []).filter(
-        (candidate) => now - candidate.capturedAt <= CAPTURED_MEDIA_TTL_MS,
-      );
-      if (!candidates.length) return null;
-
-      return candidates[0];
+    if (tab && !tab.view.webContents.isDestroyed()) {
+      try {
+        snapshot = (await tab.view.webContents.executeJavaScript(
+          this.buildActiveMediaSnapshotScript(),
+        )) as ActiveMediaSnapshot;
+      } catch (err: unknown) {
+        log.debug('Could not inspect the active media element:', err instanceof Error ? err.message : String(err));
+      }
     }
 
-    return null;
+    const target = selectDownloadTarget(pageUrl, snapshot, capturedCandidates);
+    log.info(`Resolved download target from ${target.source} for ${this.redactUrlForLog(pageUrl)}`);
+    return target;
+  }
+
+  getMediaFallbackForPage(pageUrl: string): CapturedMediaFallback | null {
+    const tab = this.findTabForPage(pageUrl);
+    return tab ? this.getCapturedMediaCandidates(tab.id)[0] || null : null;
   }
 
   getTabCount(): number {
@@ -835,6 +913,7 @@ export class TabManager implements MediaFallbackProvider {
 
     if (previousComparableUrl !== nextComparableUrl) {
       this.capturedMediaByTabId.delete(managedTab.id);
+      this.navigationIdsByTabId.set(managedTab.id, (this.navigationIdsByTabId.get(managedTab.id) || 0) + 1);
     }
 
     managedTab.info.url = url;
@@ -913,7 +992,7 @@ export class TabManager implements MediaFallbackProvider {
   }
 
   private captureMediaRequest(details: MediaRequestDetails): void {
-    if (!details.webContentsId || !this.isCapturableMediaRequest(details)) return;
+    if (!details.webContentsId || !this.isPotentialMediaRequest(details)) return;
 
     const tabId = this.tabIdsByWebContentsId.get(details.webContentsId);
     if (!tabId) return;
@@ -921,12 +1000,46 @@ export class TabManager implements MediaFallbackProvider {
     const tab = this.tabs.get(tabId);
     if (!tab) return;
 
+    this.pendingMediaRequests.set(details.id, {
+      fallback: {
+        url: details.url,
+        pageUrl: tab.info.url,
+        title: tab.info.title,
+        requestHeaders: this.pickDownloadHeaders(details.requestHeaders || {}),
+        resourceType: details.resourceType,
+        capturedAt: Date.now(),
+      },
+      navigationId: this.navigationIdsByTabId.get(tabId) || 0,
+    });
+
+    while (this.pendingMediaRequests.size > MAX_PENDING_MEDIA_REQUESTS) {
+      const oldestRequestId = this.pendingMediaRequests.keys().next().value;
+      if (oldestRequestId === undefined) break;
+      this.pendingMediaRequests.delete(oldestRequestId);
+    }
+  }
+
+  private captureMediaResponse(details: MediaRequestDetails): void {
+    const pending = this.pendingMediaRequests.get(details.id);
+    this.pendingMediaRequests.delete(details.id);
+    if (!pending || !details.webContentsId || !this.isCapturableMediaResponse(details)) return;
+
+    const tabId = this.tabIdsByWebContentsId.get(details.webContentsId);
+    if (!tabId) return;
+
+    const tab = this.tabs.get(tabId);
+    if (!tab) return;
+    if ((this.navigationIdsByTabId.get(tabId) || 0) !== pending.navigationId) return;
+
+    const mimeType = this.getResponseHeader(details.responseHeaders, 'content-type')?.split(';', 1)[0].trim();
+    const contentLengthValue = this.getResponseHeader(details.responseHeaders, 'content-length');
+    const contentLength = contentLengthValue ? Number.parseInt(contentLengthValue, 10) : undefined;
     const fallback: CapturedMediaFallback = {
+      ...pending.fallback,
       url: details.url,
-      pageUrl: tab.info.url,
-      title: tab.info.title,
-      requestHeaders: this.pickDownloadHeaders(details.requestHeaders || {}),
-      resourceType: details.resourceType,
+      statusCode: details.statusCode,
+      mimeType,
+      contentLength: Number.isFinite(contentLength) ? contentLength : undefined,
       capturedAt: Date.now(),
     };
 
@@ -947,7 +1060,7 @@ export class TabManager implements MediaFallbackProvider {
     }
   }
 
-  private isCapturableMediaRequest(details: MediaRequestDetails): boolean {
+  private isPotentialMediaRequest(details: MediaRequestDetails): boolean {
     try {
       const parsed = new URL(details.url);
       if (!['http:', 'https:'].includes(parsed.protocol)) return false;
@@ -957,7 +1070,26 @@ export class TabManager implements MediaFallbackProvider {
 
     if (isDirectMediaResourceUrl(details.url)) return true;
 
-    return details.resourceType === 'media';
+    return details.resourceType === 'media' || details.resourceType === 'xhr' || details.resourceType === 'other';
+  }
+
+  private isCapturableMediaResponse(details: MediaRequestDetails): boolean {
+    const statusCode = details.statusCode || 0;
+    if (!((statusCode >= 200 && statusCode < 300) || statusCode === 304)) return false;
+    if (isDirectMediaResourceUrl(details.url) || details.resourceType === 'media') return true;
+
+    const mimeType = this.getResponseHeader(details.responseHeaders, 'content-type')?.toLowerCase() || '';
+    return (
+      mimeType.startsWith('video/') ||
+      mimeType.startsWith('audio/') ||
+      /(?:application\/vnd\.apple\.mpegurl|application\/x-mpegurl|application\/dash\+xml)/.test(mimeType)
+    );
+  }
+
+  private getResponseHeader(headers: Record<string, string[]> | undefined, name: string): string | undefined {
+    if (!headers) return undefined;
+    const entry = Object.entries(headers).find(([headerName]) => headerName.toLowerCase() === name.toLowerCase());
+    return entry?.[1]?.[0];
   }
 
   private pickDownloadHeaders(headers: Record<string, string | string[]>): Record<string, string> {
@@ -998,6 +1130,78 @@ export class TabManager implements MediaFallbackProvider {
       return parsed.toString();
     } catch {
       return url;
+    }
+  }
+
+  private findTabForPage(pageUrl: string): ManagedTab | undefined {
+    const normalizedPageUrl = this.normalizeComparableUrl(pageUrl);
+    return Array.from(this.tabs.values()).find(
+      (tab) => this.normalizeComparableUrl(tab.info.url) === normalizedPageUrl,
+    );
+  }
+
+  private getCapturedMediaCandidates(tabId: string): CapturedMediaFallback[] {
+    const now = Date.now();
+    return rankCapturedMediaCandidates(
+      (this.capturedMediaByTabId.get(tabId) || []).filter(
+        (candidate) => now - candidate.capturedAt <= CAPTURED_MEDIA_TTL_MS,
+      ),
+    );
+  }
+
+  private buildActiveMediaSnapshotScript(): string {
+    return `(() => {
+      const absoluteUrl = (value) => {
+        if (!value) return undefined;
+        try { return new URL(value, document.baseURI).href; } catch { return undefined; }
+      };
+      const visibleArea = (rect) => {
+        const width = Math.max(0, Math.min(rect.right, innerWidth) - Math.max(rect.left, 0));
+        const height = Math.max(0, Math.min(rect.bottom, innerHeight) - Math.max(rect.top, 0));
+        return width * height;
+      };
+      const videos = Array.from(document.querySelectorAll('video'))
+        .map((video) => {
+          const rect = video.getBoundingClientRect();
+          const area = visibleArea(rect);
+          const playing = !video.paused && !video.ended && video.readyState >= 2;
+          return { video, rect, score: (playing ? 1e12 : 0) + area };
+        })
+        .filter((entry) => entry.score > 0)
+        .sort((a, b) => b.score - a.score);
+      const active = videos[0];
+      const permalinkUrls = [];
+
+      if (active) {
+        const centerX = Math.max(0, Math.min(innerWidth - 1, active.rect.left + active.rect.width / 2));
+        const centerY = Math.max(0, Math.min(innerHeight - 1, active.rect.top + active.rect.height / 2));
+        const nearby = [active.video, ...document.elementsFromPoint(centerX, centerY)];
+        for (const element of nearby) {
+          const anchor = element instanceof Element ? element.closest('a[href]') : null;
+          const href = absoluteUrl(anchor?.getAttribute('href'));
+          if (href && !permalinkUrls.includes(href)) permalinkUrls.push(href);
+        }
+      }
+
+      const canonical = document.querySelector('link[rel="canonical"]')?.getAttribute('href')
+        || document.querySelector('meta[property="og:url"]')?.getAttribute('content');
+      return {
+        canonicalUrl: absoluteUrl(canonical),
+        permalinkUrls,
+        mediaUrl: absoluteUrl(active?.video.currentSrc || active?.video.src),
+        title: document.title || undefined,
+      };
+    })()`;
+  }
+
+  private redactUrlForLog(url: string): string {
+    try {
+      const parsed = new URL(url);
+      if (parsed.search) parsed.search = '?[redacted]';
+      if (parsed.hash) parsed.hash = '#[redacted]';
+      return parsed.toString();
+    } catch {
+      return '[invalid-url]';
     }
   }
 
@@ -1386,6 +1590,10 @@ export class TabManager implements MediaFallbackProvider {
     this.unsubscribeSettings?.();
     this.unsubscribeSettings = undefined;
 
+    session.defaultSession.webRequest.onBeforeSendHeaders(null);
+    session.defaultSession.webRequest.onResponseStarted(null);
+    session.defaultSession.webRequest.onErrorOccurred(null);
+
     // Remove IPC handlers
     ipcMain.removeHandler(IPC_CHANNELS.TAB_CREATE);
     ipcMain.removeHandler(IPC_CHANNELS.TAB_CLOSE);
@@ -1409,6 +1617,13 @@ export class TabManager implements MediaFallbackProvider {
       this.mediaDetector?.unregisterTabWebContents(tab.view.webContents.id);
       tab.view.webContents.close();
     }
+    for (const popup of this.popupWindows) {
+      if (!popup.isDestroyed()) popup.close();
+    }
+    this.popupWindows.clear();
+    this.pendingMediaRequests.clear();
+    this.capturedMediaByTabId.clear();
+    this.navigationIdsByTabId.clear();
     this.tabs.clear();
   }
 }

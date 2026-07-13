@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
-import { launchApp, type LaunchedApp } from './helpers/app';
+import { launchApp, waitForPage, type LaunchedApp } from './helpers/app';
+import { startTestServer } from './helpers/server';
 
 type ShellWindow = {
   electronAPI: {
@@ -30,6 +31,25 @@ test.describe('download pipeline (mocked yt-dlp)', () => {
     expect(info?.title).toBe('Mock Video metamock');
     expect(info?.uploader).toBe('MyTube E2E');
     expect(info?.formats.length).toBeGreaterThan(0);
+  });
+
+  test('resolves the permalink associated with the visible video in a feed', async () => {
+    const server = await startTestServer();
+    try {
+      const pageUrl = `${server.baseUrl}/media-feed`;
+      await launched.shell.locator('.url-input').fill(pageUrl);
+      await launched.shell.locator('.url-input').press('Enter');
+      const tabPage = await waitForPage(launched.app, (url) => url === pageUrl);
+      await expect(tabPage.locator('#active-video')).toBeVisible();
+
+      const info = await launched.shell.evaluate((url) => {
+        return (window as unknown as ShellWindow).electronAPI.getMediaInfo(url);
+      }, pageUrl);
+
+      expect(info?.title).toBe('Mock Video e2eactive');
+    } finally {
+      await server.close();
+    }
   });
 
   test('downloads a video, shows it in the panel, and writes the file', async () => {
