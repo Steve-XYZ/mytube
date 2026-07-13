@@ -1,18 +1,19 @@
 .permission-prompt {
   position: fixed;
   top: 96px;
-  left: 16px;
+  /* Clear the sidebar (width published by Sidebar.tsx) instead of covering it. */
+  left: calc(var(--sidebar-width, 200px) + 16px);
   z-index: 1000;
   display: flex;
   align-items: center;
   gap: 12px;
   max-width: 420px;
   padding: 10px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border-color, rgba(0, 0, 0, 0.15));
-  background: var(--bg-secondary, #fff);
+  background: var(--bg-elevated, #fff);
   color: var(--text-primary, #222);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-panel, 0 6px 24px rgba(0, 0, 0, 0.18));
 }
 
 .permission-prompt-text {
@@ -38,8 +39,8 @@
 }
 
 .permission-prompt-allow {
-  background: var(--accent-color, #2563eb);
-  color: #fff;
+  background: var(--accent-gradient, var(--accent-color, #2563eb));
+  color: var(--accent-contrast, #fff);
 }
 
 .permission-prompt-allow:hover {

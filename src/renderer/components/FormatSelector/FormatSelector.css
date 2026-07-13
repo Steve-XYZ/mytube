@@ -11,11 +11,11 @@
 .format-dialog {
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   width: 480px;
   max-height: 80vh;
   overflow-y: auto;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-panel);
 }
 
 .format-header {
@@ -183,17 +183,18 @@
 
 .format-btn {
   padding: 8px 20px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   border: none;
-  transition: background 0.15s;
+  transition: background 0.15s, filter 0.15s;
 }
 
 .format-btn-primary {
-  background: var(--accent-color);
-  color: white;
+  background: var(--accent-gradient);
+  color: var(--accent-contrast);
+  box-shadow: var(--accent-glow);
 }
 
 .format-btn-primary:hover {

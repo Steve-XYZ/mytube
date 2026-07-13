@@ -2,7 +2,12 @@ import { app, BaseWindow, WebContentsView, ipcMain, session, Menu, MenuItem, cli
 import * as fs from 'fs';
 import * as path from 'path';
 import { TabInfo, IPC_CHANNELS, FindInPageResult } from '../../shared/types';
-import { DEFAULT_URL, HEADER_HEIGHT } from '../../shared/constants';
+import {
+  DEFAULT_URL,
+  HEADER_HEIGHT,
+  SIDEBAR_WIDTH_COLLAPSED,
+  SIDEBAR_WIDTH_EXPANDED,
+} from '../../shared/constants';
 import type { SettingsManager } from '../settings/SettingsManager';
 import { writeFileAtomic } from '../utils/fsAtomic';
 import { YtDlpController } from '../download/YtDlpController';
@@ -66,6 +71,7 @@ export class TabManager implements MediaFallbackProvider {
   private sessionSaveTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
   private visitRecorder?: VisitRecorder;
+  private unsubscribeSettings?: () => void;
 
   constructor(
     window: BaseWindow,
@@ -87,6 +93,9 @@ export class TabManager implements MediaFallbackProvider {
     this.setupPermissions();
     this.setupMediaRequestCapture();
     this.startSuspendTimer();
+    this.unsubscribeSettings = settingsManager?.onSettingChanged((key) => {
+      if (key === 'browser.sidebarCollapsed') this.updateAllTabBounds();
+    });
   }
 
   // ==================== IPC Handlers ====================
@@ -397,8 +406,13 @@ export class TabManager implements MediaFallbackProvider {
     tab.view.webContents.loadURL(url);
   }
 
+  // Cached: getDisplayUrlForLoadedUrl compares against it on every
+  // navigation event, and the exact-match check needs a stable string anyway.
+  private newTabDataUrl?: string;
+
   private getNewTabDataUrl(): string {
-    return `data:text/html;charset=utf-8,${encodeURIComponent(this.buildNewTabPage())}`;
+    this.newTabDataUrl ??= `data:text/html;charset=utf-8,${encodeURIComponent(this.buildNewTabPage())}`;
+    return this.newTabDataUrl;
   }
 
   private getDisplayUrlForLoadedUrl(url: string): string {
@@ -799,12 +813,19 @@ export class TabManager implements MediaFallbackProvider {
 
   private updateTabBounds(view: WebContentsView): void {
     const bounds = this.window.getBounds();
+    const sidebarWidth = this.getSidebarWidth();
     view.setBounds({
-      x: 0,
+      x: sidebarWidth,
       y: HEADER_HEIGHT,
-      width: bounds.width,
+      width: bounds.width - sidebarWidth,
       height: bounds.height - HEADER_HEIGHT,
     });
+  }
+
+  private getSidebarWidth(): number {
+    return this.settingsManager?.get('browser.sidebarCollapsed') === true
+      ? SIDEBAR_WIDTH_COLLAPSED
+      : SIDEBAR_WIDTH_EXPANDED;
   }
 
   private updateNavState(managedTab: ManagedTab, url: string): void {
@@ -1001,19 +1022,46 @@ export class TabManager implements MediaFallbackProvider {
     }
   }
 
+  // Follows the app theme via prefers-color-scheme: SettingsManager keeps
+  // nativeTheme.themeSource in sync with the setting, and Electron applies it
+  // to every webContents. Only reached via getNewTabDataUrl(), which caches
+  // the result for exact-match comparisons.
   private buildNewTabPage(): string {
-    const platforms = [
-      ['YouTube', 'https://www.youtube.com'],
-      ['Instagram', 'https://www.instagram.com'],
-      ['TikTok', 'https://www.tiktok.com'],
-      ['Facebook', 'https://www.facebook.com/watch'],
-      ['Vimeo', 'https://vimeo.com'],
-      ['Dailymotion', 'https://www.dailymotion.com'],
-      ['Twitch', 'https://www.twitch.tv'],
-      ['SoundCloud', 'https://soundcloud.com'],
+    const icons: Record<string, string> = {
+      youtube: `<svg viewBox="0 0 24 24"><path fill="#fff" d="M9.5 8.2v7.6l6.5-3.8z"/></svg>`,
+      instagram: `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="4.5"/><circle cx="12" cy="12" r="3.6"/><circle cx="16.7" cy="7.3" r="1.1" fill="#fff" stroke="none"/></svg>`,
+      tiktok: `<svg viewBox="0 0 24 24"><path fill="#fff" d="M16.6 4c.3 2 1.6 3.4 3.9 3.6v2.9c-1.5 0-2.8-.4-3.9-1.2v5.4c0 3-2.4 5.3-5.3 5.3S6 17.7 6 14.7s2.4-5.3 5.3-5.3c.3 0 .6 0 .9.1v3c-.3-.1-.6-.2-.9-.2-1.3 0-2.4 1.1-2.4 2.4s1.1 2.4 2.4 2.4 2.4-1.1 2.4-2.4V4h2.9z"/></svg>`,
+      facebook: `<svg viewBox="0 0 24 24"><path fill="#fff" d="M13.5 21v-7h2.4l.4-3h-2.8V9.1c0-.9.3-1.5 1.6-1.5h1.3V4.9c-.2 0-1-.1-1.9-.1-1.9 0-3.2 1.2-3.2 3.3V11H9v3h2.3v7h2.2z"/></svg>`,
+      vimeo: `<svg viewBox="0 0 24 24"><text x="12" y="17" font-family="-apple-system,sans-serif" font-size="14" font-weight="800" fill="#fff" text-anchor="middle">V</text></svg>`,
+      dailymotion: `<svg viewBox="0 0 24 24"><text x="12" y="17.5" font-family="-apple-system,sans-serif" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">d</text></svg>`,
+      twitch: `<svg viewBox="0 0 24 24"><path fill="#fff" d="M5 3L3.5 6.5V19h4v2.5h2.5L12.5 19H16l4.5-4.5V3H5zm14 10.8L16.5 16H13l-2.5 2.5V16H7V4.5h12v9.3zM15.5 7.5H17V12h-1.5V7.5zm-4 0H13V12h-1.5V7.5z"/></svg>`,
+      soundcloud: `<svg viewBox="0 0 24 24" fill="#fff"><rect x="4" y="12" width="1.6" height="6" rx="0.8"/><rect x="6.8" y="10" width="1.6" height="8" rx="0.8"/><rect x="9.6" y="8" width="1.6" height="10" rx="0.8"/><path d="M12.6 18h4.9a3.5 3.5 0 0 0 .6-6.95A5 5 0 0 0 12.6 7.5V18z"/></svg>`,
+    };
+
+    const platforms: Array<[string, string, string, string, string]> = [
+      ['YouTube', 'Videos, Shorts, Live', 'https://www.youtube.com', 'youtube', '#FF0000'],
+      [
+        'Instagram',
+        'Posts, Reels, Stories',
+        'https://www.instagram.com',
+        'instagram',
+        'radial-gradient(circle at 30% 110%, #fdf497 0%, #fd5949 45%, #d6249f 60%, #285AEB 90%)',
+      ],
+      ['TikTok', 'Videos, Sounds', 'https://www.tiktok.com', 'tiktok', '#010101'],
+      ['Facebook', 'Videos, Reels', 'https://www.facebook.com/watch', 'facebook', '#1877F2'],
+      ['Vimeo', 'Videos', 'https://vimeo.com', 'vimeo', '#1AB7EA'],
+      ['Dailymotion', 'Videos', 'https://www.dailymotion.com', 'dailymotion', '#0D0D40'],
+      ['Twitch', 'Clips, VODs, Live', 'https://www.twitch.tv', 'twitch', '#9146FF'],
+      ['SoundCloud', 'Tracks, Playlists', 'https://soundcloud.com', 'soundcloud', '#FF5500'],
     ];
     const links = platforms
-      .map(([name, href]) => `<a class="quick-link" href="${href}"><span>${name}</span></a>`)
+      .map(
+        ([name, subtitle, href, icon, bg]) => `<a class="card" href="${href}">
+      <span class="card-icon" style="background:${bg}">${icons[icon]}</span>
+      <span class="card-text"><span class="card-name">${name}</span><span class="card-sub">${subtitle}</span></span>
+      <svg class="card-arrow" viewBox="0 0 16 16"><path d="M6 3.5L10.5 8 6 12.5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>`,
+      )
       .join('');
 
     return `<!doctype html>
@@ -1023,31 +1071,138 @@ export class TabManager implements MediaFallbackProvider {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MyTube</title>
   <style>
-    :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: start center; background: Canvas; color: CanvasText; }
-    main { width: min(880px, calc(100vw - 48px)); padding: 72px 0 48px; }
-    h1 { margin: 0 0 8px; font-size: 40px; line-height: 1.1; font-weight: 700; letter-spacing: 0; }
-    .subtitle { margin: 0 0 28px; color: color-mix(in srgb, CanvasText 68%, Canvas); font-size: 15px; }
-    form { display: flex; gap: 10px; margin-bottom: 28px; }
-    input { flex: 1; min-width: 0; height: 44px; border: 1px solid color-mix(in srgb, CanvasText 18%, Canvas); border-radius: 8px; padding: 0 14px; font: inherit; background: Canvas; color: CanvasText; }
-    button { height: 44px; border: 0; border-radius: 8px; padding: 0 18px; font: inherit; font-weight: 600; color: white; background: #1f6feb; cursor: pointer; }
-    .section-title { margin: 26px 0 12px; font-size: 13px; font-weight: 700; text-transform: uppercase; color: color-mix(in srgb, CanvasText 62%, Canvas); }
-    .quick-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-    .quick-link { display: flex; align-items: center; min-height: 44px; border: 1px solid color-mix(in srgb, CanvasText 14%, Canvas); border-radius: 8px; padding: 0 14px; color: CanvasText; text-decoration: none; background: color-mix(in srgb, CanvasText 4%, Canvas); }
-    .note { margin-top: 22px; max-width: 720px; color: color-mix(in srgb, CanvasText 62%, Canvas); font-size: 13px; line-height: 1.5; }
+    :root {
+      color-scheme: light dark;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --bg: #f5f5f8;
+      --text: #17171c;
+      --text-muted: #5d5d68;
+      --text-faint: #8a8a96;
+      --accent: #e91e4f;
+      --surface: rgba(255, 255, 255, 0.85);
+      --surface-hover: #ffffff;
+      --surface-border: #e2e2ea;
+      --glow-a: rgba(233, 30, 79, 0.08);
+      --glow-b: rgba(255, 71, 87, 0.06);
+      --glow-c: rgba(80, 40, 200, 0.05);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b0b11;
+        --text: #f2f2f6;
+        --text-muted: #9c9cab;
+        --text-faint: #626270;
+        --accent: #ff3d63;
+        --surface: rgba(22, 22, 30, 0.75);
+        --surface-hover: rgba(28, 28, 38, 0.9);
+        --surface-border: #24242f;
+        --glow-a: rgba(255, 45, 105, 0.14);
+        --glow-b: rgba(255, 71, 87, 0.1);
+        --glow-c: rgba(80, 40, 200, 0.08);
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: start center;
+      background: var(--bg); color: var(--text);
+      background-image:
+        radial-gradient(1000px 480px at 85% -10%, var(--glow-a), transparent 60%),
+        radial-gradient(800px 420px at 0% 110%, var(--glow-b), transparent 60%),
+        radial-gradient(500px 300px at 15% 10%, var(--glow-c), transparent 70%);
+      background-attachment: fixed;
+    }
+    main { width: min(920px, calc(100vw - 48px)); padding: 56px 0 48px; }
+    .hero { text-align: center; margin-bottom: 36px; }
+    h1 {
+      margin: 0 0 6px; font-size: 68px; line-height: 1.05; font-weight: 800;
+      font-style: italic; letter-spacing: -2px;
+    }
+    h1 .tube {
+      background: linear-gradient(135deg, #ff4757 0%, #ff2d78 100%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .tagline { margin: 0; color: var(--text-muted); font-size: 17px; }
+    .tagline strong { color: var(--accent); font-weight: 600; }
+    form {
+      display: flex; align-items: center; gap: 10px; margin: 0 auto 40px;
+      max-width: 760px; height: 56px; padding: 0 8px 0 20px;
+      background: var(--surface); border: 1px solid rgba(255, 61, 99, 0.45);
+      border-radius: 16px; box-shadow: 0 0 24px rgba(255, 45, 105, 0.12);
+    }
+    form:focus-within { border-color: var(--accent); box-shadow: 0 0 28px rgba(255, 45, 105, 0.25); }
+    .search-icon { flex-shrink: 0; color: var(--text-faint); }
+    input {
+      flex: 1; min-width: 0; height: 100%; border: 0; padding: 0;
+      font: inherit; font-size: 15px; background: transparent; color: var(--text); outline: none;
+    }
+    input::placeholder { color: var(--text-faint); }
+    button {
+      height: 40px; border: 0; border-radius: 12px; padding: 0 30px;
+      font: inherit; font-size: 15px; font-weight: 700; color: #fff; cursor: pointer;
+      background: linear-gradient(135deg, #ff4757 0%, #ff2d78 100%);
+      box-shadow: 0 4px 16px rgba(255, 45, 105, 0.35);
+    }
+    button:hover { filter: brightness(1.08); }
+    .section-title {
+      display: flex; align-items: center; gap: 8px; margin: 0 0 14px;
+      font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted);
+    }
+    .section-title::before {
+      content: ""; width: 8px; height: 8px; border-radius: 2px;
+      background: linear-gradient(135deg, #ff4757, #ff2d78);
+    }
+    .quick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+    .card {
+      display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+      border: 1px solid var(--surface-border); border-radius: 14px; text-decoration: none;
+      background: var(--surface); transition: border-color 0.15s, transform 0.15s, background 0.15s;
+    }
+    .card:hover { border-color: rgba(255, 61, 99, 0.55); background: var(--surface-hover); transform: translateY(-1px); }
+    .card-icon {
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+      width: 40px; height: 40px; border-radius: 10px;
+    }
+    .card-icon svg { width: 24px; height: 24px; }
+    .card-text { display: flex; flex-direction: column; min-width: 0; }
+    .card-name { color: var(--text); font-size: 14px; font-weight: 600; }
+    .card-sub { color: var(--text-faint); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card-arrow { width: 16px; height: 16px; margin-left: auto; flex-shrink: 0; color: var(--text-faint); }
+    .card:hover .card-arrow { color: var(--accent); }
+    .banner {
+      display: flex; align-items: center; gap: 16px; margin-top: 28px; padding: 18px 20px;
+      border: 1px solid var(--surface-border); border-radius: 16px; background: var(--surface);
+    }
+    .banner-icon {
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+      width: 44px; height: 44px; border-radius: 50%;
+      background: linear-gradient(135deg, #ff4757, #ff2d78);
+      box-shadow: 0 4px 16px rgba(255, 45, 105, 0.35);
+    }
+    .banner-icon svg { width: 20px; height: 20px; }
+    .banner-title { margin: 0 0 3px; font-size: 15px; font-weight: 700; }
+    .banner-note { margin: 0; color: var(--text-muted); font-size: 12.5px; line-height: 1.5; }
   </style>
 </head>
 <body>
   <main>
-    <h1>MyTube</h1>
-    <p class="subtitle">Search, paste a media URL, or open a supported site.</p>
+    <div class="hero">
+      <h1><span>My</span><span class="tube">Tube</span></h1>
+      <p class="tagline">Your world. <strong>Your media.</strong></p>
+    </div>
     <form id="search-form">
-      <input id="search-input" autofocus placeholder="Search or enter URL" />
+      <svg class="search-icon" width="18" height="18" viewBox="0 0 18 18" fill="currentColor"><path d="M12.5 11h-.79l-.28-.27A6.471 6.471 0 0 0 13 6.5 6.5 6.5 0 1 0 6.5 13c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L17.49 16l-4.99-5zm-6 0C4.01 11 2 8.99 2 6.5S4.01 2 6.5 2 11 4.01 11 6.5 8.99 11 6.5 11z"/></svg>
+      <input id="search-input" autofocus placeholder="Search or paste a media URL here..." />
       <button type="submit">Go</button>
     </form>
     <div class="section-title">Supported starting points</div>
     <div class="quick-grid">${links}</div>
-    <p class="note">Downloads depend on site support, public availability, and rights. MyTube does not bypass DRM or platform restrictions.</p>
+    <div class="banner">
+      <span class="banner-icon"><svg viewBox="0 0 24 24"><path fill="#fff" d="M13 2L4.5 13.5H11L9.5 22 19 10h-6.5L13 2z"/></svg></span>
+      <div>
+        <p class="banner-title">Fast. Smart. Private.</p>
+        <p class="banner-note">Downloads depend on site support, public availability, and rights. MyTube does not bypass DRM or platform restrictions.</p>
+      </div>
+    </div>
   </main>
   <script>
     const form = document.getElementById('search-form');
@@ -1086,31 +1241,39 @@ export class TabManager implements MediaFallbackProvider {
 <head>
 <meta charset="utf-8">
 <style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f8; --text: #17171c; --muted: #5d5d68; --faint: #8a8a96;
+    --chip: rgba(0, 0, 0, 0.05); --glow: rgba(233, 30, 79, 0.07);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0b11; --text: #f2f2f6; --muted: #9c9cab; --faint: #626270;
+      --chip: rgba(255, 255, 255, 0.05); --glow: rgba(255, 45, 105, 0.1);
+    }
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #1a1a2e; color: #e0e0e0;
+    background: var(--bg); color: var(--text);
+    background-image: radial-gradient(700px 380px at 50% -10%, var(--glow), transparent 60%);
     display: flex; align-items: center; justify-content: center;
     min-height: 100vh; padding: 2rem;
   }
   .container { text-align: center; max-width: 480px; }
   .icon { font-size: 4rem; margin-bottom: 1.5rem; opacity: 0.6; }
-  h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.75rem; color: #fff; }
-  .description { color: #999; margin-bottom: 1.5rem; line-height: 1.6; font-size: 0.95rem; }
-  .url { color: #666; font-size: 0.8rem; word-break: break-all; margin-bottom: 2rem;
-    background: rgba(255,255,255,0.05); padding: 0.5rem 1rem; border-radius: 6px; }
-  .error-code { color: #555; font-size: 0.75rem; margin-bottom: 2rem; }
+  h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--text); }
+  .description { color: var(--muted); margin-bottom: 1.5rem; line-height: 1.6; font-size: 0.95rem; }
+  .url { color: var(--faint); font-size: 0.8rem; word-break: break-all; margin-bottom: 2rem;
+    background: var(--chip); padding: 0.5rem 1rem; border-radius: 8px; }
+  .error-code { color: var(--faint); font-size: 0.75rem; margin-bottom: 2rem; }
   button {
-    background: #e04040; color: white; border: none; padding: 0.7rem 2rem;
-    border-radius: 8px; font-size: 0.95rem; cursor: pointer; font-weight: 500;
-    transition: background 0.2s;
+    background: linear-gradient(135deg, #ff4757 0%, #ff2d78 100%); color: white; border: none; padding: 0.7rem 2rem;
+    border-radius: 12px; font-size: 0.95rem; cursor: pointer; font-weight: 600;
+    box-shadow: 0 4px 16px rgba(255, 45, 105, 0.35);
+    transition: filter 0.2s;
   }
-  button:hover { background: #c03030; }
-  @media (prefers-color-scheme: light) {
-    body { background: #f5f5f5; color: #333; }
-    h1 { color: #111; }
-    .url { background: rgba(0,0,0,0.05); }
-  }
+  button:hover { filter: brightness(1.08); }
 </style>
 </head>
 <body>
@@ -1219,6 +1382,9 @@ export class TabManager implements MediaFallbackProvider {
       clearInterval(this.suspendTimer);
       this.suspendTimer = null;
     }
+
+    this.unsubscribeSettings?.();
+    this.unsubscribeSettings = undefined;
 
     // Remove IPC handlers
     ipcMain.removeHandler(IPC_CHANNELS.TAB_CREATE);
