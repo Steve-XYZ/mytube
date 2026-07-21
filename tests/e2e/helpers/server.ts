@@ -4,6 +4,8 @@ import type { AddressInfo } from 'net';
 
 export interface TestServer {
   baseUrl: string;
+  failureBaseUrl: string;
+  waitForFailureRequest(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -120,6 +122,19 @@ function getImages(): Record<string, Buffer> {
 
 /** Local static server so navigation/gallery tests never depend on the live network. */
 export async function startTestServer(): Promise<TestServer> {
+  let resolveFailureRequest: (() => void) | undefined;
+  const failureRequest = new Promise<void>((resolve) => {
+    resolveFailureRequest = resolve;
+  });
+  const failureServer = http.createServer((req) => {
+    resolveFailureRequest?.();
+    resolveFailureRequest = undefined;
+    req.socket.destroy();
+  });
+  await new Promise<void>((resolve) => failureServer.listen(0, '127.0.0.1', resolve));
+  const failurePort = (failureServer.address() as AddressInfo).port;
+  const failureBaseUrl = `http://127.0.0.1:${failurePort}`;
+
   const server = http.createServer((req, res) => {
     const url = new URL(req.url || '/', 'http://127.0.0.1');
 
@@ -137,7 +152,17 @@ export async function startTestServer(): Promise<TestServer> {
       return;
     }
 
-    const body = PAGES[url.pathname];
+    const body =
+      url.pathname === '/subframe-failure'
+        ? `<!doctype html>
+<html>
+  <head><title>E2E Healthy Main Frame</title></head>
+  <body>
+    <h1 id="heading">Healthy Main Frame</h1>
+    <iframe id="broken-frame" src="${failureBaseUrl}/broken-frame"></iframe>
+  </body>
+</html>`
+        : PAGES[url.pathname];
     if (!body) {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('not found');
@@ -152,7 +177,14 @@ export async function startTestServer(): Promise<TestServer> {
 
   return {
     baseUrl: `http://127.0.0.1:${port}`,
-    close: () => new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
+    failureBaseUrl,
+    waitForFailureRequest: () => failureRequest,
+    close: async () => {
+      await Promise.all([
+        new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
+        new Promise<void>((resolve, reject) => failureServer.close((err) => (err ? reject(err) : resolve()))),
+      ]);
+    },
   };
 }
 

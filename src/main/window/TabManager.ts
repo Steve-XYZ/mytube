@@ -38,6 +38,7 @@ interface ManagedTab {
   view: WebContentsView;
   info: TabInfo;
   suspendedUrl?: string;
+  pendingMainFrameUrl?: string;
   lastActiveAt: number;
 }
 
@@ -550,6 +551,18 @@ export class TabManager implements MediaFallbackProvider {
     const { view, info } = managedTab;
     const wc = view.webContents;
 
+    wc.on('did-start-navigation', (_event, url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace) {
+        managedTab.pendingMainFrameUrl = url;
+      }
+    });
+
+    wc.on('will-redirect', (_event, url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace) {
+        managedTab.pendingMainFrameUrl = url;
+      }
+    });
+
     wc.on('did-start-loading', () => {
       info.isLoading = true;
       this.notifyTabUpdate(info);
@@ -569,6 +582,7 @@ export class TabManager implements MediaFallbackProvider {
     });
 
     wc.on('did-navigate', (_event, navUrl) => {
+      managedTab.pendingMainFrameUrl = undefined;
       this.updateNavState(managedTab, this.getDisplayUrlForLoadedUrl(navUrl));
       // info.title still holds the previous page's title here; record with an
       // empty title (falls back to the URL) and let page-title-updated fill it.
@@ -657,8 +671,15 @@ export class TabManager implements MediaFallbackProvider {
     });
 
     // Handle did-fail-load — show error page
-    wc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
-      if (errorCode === -3) return; // ERR_ABORTED is normal (navigation cancelled)
+    wc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (errorCode === -3 || !isMainFrame) return; // ERR_ABORTED and subframe failures must not replace the tab
+
+      const expectedUrl = managedTab.pendingMainFrameUrl || managedTab.info.url;
+      if (expectedUrl && this.normalizeComparableUrl(expectedUrl) !== this.normalizeComparableUrl(validatedURL)) {
+        log.debug(`Ignored stale main-frame load failure for tab ${info.id}: ${this.redactUrlForLog(validatedURL)}`);
+        return;
+      }
+      managedTab.pendingMainFrameUrl = undefined;
       log.warn(`Tab ${info.id} failed to load: ${validatedURL} (${errorCode}: ${errorDescription})`);
 
       const errorPage = this.buildErrorPage(errorCode, errorDescription, validatedURL);
