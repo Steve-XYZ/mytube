@@ -516,6 +516,7 @@ export class YtDlpController {
       this.withCommonArgs(baseArgs, url, profile, options)
         .then(({ args: fullArgs, cleanup }) => {
           log.info(`Starting download ${downloadId} [${profile.name}]: yt-dlp ${this.getSafeArgsForLog(fullArgs)}`);
+          const startedAt = Date.now();
 
           const proc = spawn(this.ytdlpPath, fullArgs, {
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -567,16 +568,17 @@ export class YtDlpController {
           proc.on('close', (code) => {
             this.activeProcesses.delete(downloadId);
             cleanup();
+            const durationMs = Date.now() - startedAt;
 
             if (code === 0) {
-              log.info(`Download ${downloadId} completed: ${lastFilename}`);
+              log.info(`Download ${downloadId} completed in ${durationMs} ms: ${lastFilename}`);
               resolve({ status: 'completed', filename: lastFilename, error: '' });
             } else if (code === null) {
               // Process was killed (cancelled)
-              log.info(`Download ${downloadId} cancelled`);
+              log.info(`Download ${downloadId} cancelled after ${durationMs} ms`);
               resolve({ status: 'cancelled', filename: lastFilename, error: 'Download cancelled' });
             } else {
-              log.error(`Download ${downloadId} [${profile.name}] failed with code ${code}`);
+              log.error(`Download ${downloadId} [${profile.name}] failed with code ${code} after ${durationMs} ms`);
               const detail = this.getUserFacingExtractionError(new Error(stderrTail.trim()), url);
               resolve({
                 status: 'error',
@@ -589,7 +591,7 @@ export class YtDlpController {
           proc.on('error', (err: NodeJS.ErrnoException) => {
             this.activeProcesses.delete(downloadId);
             cleanup();
-            log.error(`Download ${downloadId} process error:`, err);
+            log.error(`Download ${downloadId} process error after ${Date.now() - startedAt} ms:`, err);
             if (err.code === 'ENOENT') {
               this.binariesAvailable = false;
               resolve({
@@ -643,6 +645,7 @@ export class YtDlpController {
       });
       const maxRuntimeMs = options?.maxRuntimeMs ?? METADATA_MAX_RUNTIME_MS;
       const idleTimeoutMs = options?.idleTimeoutMs ?? METADATA_IDLE_TIMEOUT_MS;
+      const startedAt = Date.now();
       let stdout = '';
       let stderr = '';
       let settled = false;
@@ -654,31 +657,38 @@ export class YtDlpController {
         forceKillTimer.unref?.();
       };
 
-      const finish = (fn: () => void): void => {
+      const finish = (outcome: 'completed' | 'cancelled' | 'timeout' | 'failed', fn: () => void): void => {
         if (settled) return;
         settled = true;
         clearTimeout(maxRuntimeTimer);
         if (idleTimer) clearTimeout(idleTimer);
         options?.signal?.removeEventListener('abort', onAbort);
         cleanup();
+        const durationMs = Date.now() - startedAt;
+        const message = `[performance] ytdlp_metadata profile=${profile?.name || 'default'} outcome=${outcome} duration_ms=${durationMs}`;
+        if (outcome === 'timeout' || (outcome === 'failed' && durationMs >= 3_000)) {
+          log.warn(message);
+        } else {
+          log.debug(message);
+        }
         fn();
       };
 
       const onAbort = (): void => {
         terminate();
-        finish(() => reject(this.createMetadataAbortError()));
+        finish('cancelled', () => reject(this.createMetadataAbortError()));
       };
 
       const maxRuntimeTimer = setTimeout(() => {
         terminate();
-        finish(() => reject(new Error(`yt-dlp metadata extraction timed out after ${maxRuntimeMs} ms`)));
+        finish('timeout', () => reject(new Error(`yt-dlp metadata extraction timed out after ${maxRuntimeMs} ms`)));
       }, maxRuntimeMs);
 
       const resetIdleTimer = (): void => {
         if (idleTimer) clearTimeout(idleTimer);
         idleTimer = setTimeout(() => {
           terminate();
-          finish(() => reject(new Error(`yt-dlp metadata extraction stalled for ${idleTimeoutMs} ms`)));
+          finish('timeout', () => reject(new Error(`yt-dlp metadata extraction stalled for ${idleTimeoutMs} ms`)));
         }, idleTimeoutMs);
       };
 
@@ -697,18 +707,18 @@ export class YtDlpController {
 
       proc.on('close', (code) => {
         if (code === 0) {
-          finish(() => resolve(stdout.trim()));
+          finish('completed', () => resolve(stdout.trim()));
         } else {
-          finish(() => reject(new Error(`yt-dlp exited with code ${code}: ${stderr.trim()}`)));
+          finish('failed', () => reject(new Error(`yt-dlp exited with code ${code}: ${stderr.trim()}`)));
         }
       });
 
       proc.on('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'ENOENT') {
           this.binariesAvailable = false;
-          finish(() => reject(new Error('yt-dlp binary not found. Please reinstall the application.')));
+          finish('failed', () => reject(new Error('yt-dlp binary not found. Please reinstall the application.')));
         } else {
-          finish(() => reject(new Error(`Failed to execute yt-dlp: ${err.message}`)));
+          finish('failed', () => reject(new Error(`Failed to execute yt-dlp: ${err.message}`)));
         }
       });
 

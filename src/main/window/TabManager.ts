@@ -39,6 +39,7 @@ interface ManagedTab {
   info: TabInfo;
   suspendedUrl?: string;
   pendingMainFrameUrl?: string;
+  navigationStartedAt?: number;
   lastActiveAt: number;
 }
 
@@ -557,6 +558,7 @@ export class TabManager implements MediaFallbackProvider {
     wc.on('did-start-navigation', (_event, url, isInPlace, isMainFrame) => {
       if (isMainFrame && !isInPlace) {
         managedTab.pendingMainFrameUrl = url;
+        managedTab.navigationStartedAt = /^https?:/i.test(url) ? Date.now() : undefined;
       }
     });
 
@@ -574,6 +576,7 @@ export class TabManager implements MediaFallbackProvider {
     wc.on('did-stop-loading', () => {
       info.isLoading = false;
       this.notifyTabUpdate(info);
+      this.logNavigationTiming(managedTab, 'completed');
     });
 
     // Log console errors from tab pages (helps debug video playback issues)
@@ -682,6 +685,7 @@ export class TabManager implements MediaFallbackProvider {
         log.debug(`Ignored stale main-frame load failure for tab ${info.id}: ${this.redactUrlForLog(validatedURL)}`);
         return;
       }
+      this.logNavigationTiming(managedTab, 'failed');
       managedTab.pendingMainFrameUrl = undefined;
       log.warn(`Tab ${info.id} failed to load: ${validatedURL} (${errorCode}: ${errorDescription})`);
 
@@ -1236,6 +1240,27 @@ export class TabManager implements MediaFallbackProvider {
       return parsed.toString();
     } catch {
       return '[invalid-url]';
+    }
+  }
+
+  private logNavigationTiming(managedTab: ManagedTab, outcome: 'completed' | 'failed'): void {
+    if (managedTab.navigationStartedAt === undefined) return;
+    const durationMs = Date.now() - managedTab.navigationStartedAt;
+    managedTab.navigationStartedAt = undefined;
+    const origin = this.getOriginForLog(managedTab.pendingMainFrameUrl || managedTab.info.url);
+    const message = `[performance] navigation tab=${managedTab.id} outcome=${outcome} duration_ms=${durationMs} origin=${origin}`;
+    if (outcome === 'failed' || durationMs >= 3_000) {
+      log.warn(message);
+    } else {
+      log.debug(message);
+    }
+  }
+
+  private getOriginForLog(url: string): string {
+    try {
+      return new URL(url).origin;
+    } catch {
+      return '[invalid-origin]';
     }
   }
 
