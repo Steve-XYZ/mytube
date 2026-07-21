@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import * as path from 'path';
 import { app } from 'electron';
-import { YtDlpController } from '../../src/main/download/YtDlpController';
+import { probeYtDlpVersion, YtDlpController } from '../../src/main/download/YtDlpController';
 
 const originalIsPackaged = app.isPackaged;
 const originalResourcesPath = process.resourcesPath;
@@ -18,6 +18,19 @@ type PathProbe = {
 };
 
 const probe = () => Object.create(YtDlpController.prototype) as PathProbe;
+
+describe('YtDlpController version probing', () => {
+  it('probes a binary version asynchronously', async () => {
+    let settled = false;
+    const versionPromise = probeYtDlpVersion(process.execPath, process.env).then((version) => {
+      settled = true;
+      return version;
+    });
+
+    expect(settled).toBe(false);
+    await expect(versionPromise).resolves.toBe(process.version);
+  });
+});
 
 describe('YtDlpController packaged JavaScript runtime', () => {
   it('uses Electron as the bundled Node.js executable', () => {

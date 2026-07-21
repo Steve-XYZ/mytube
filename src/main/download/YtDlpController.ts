@@ -1,4 +1,4 @@
-import { spawn, spawnSync, ChildProcess } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { randomUUID } from 'crypto';
@@ -79,11 +79,52 @@ const DEFAULT_BROWSER_USER_AGENT = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15
 const VIDEO_INFO_CACHE_TTL_MS = 5 * 60 * 1000;
 const METADATA_MAX_RUNTIME_MS = 10 * 60 * 1000;
 const METADATA_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
+const VERSION_PROBE_TIMEOUT_MS = 2_000;
+
+export function probeYtDlpVersion(
+  binaryPath: string,
+  env: NodeJS.ProcessEnv,
+  timeoutMs = VERSION_PROBE_TIMEOUT_MS,
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    let stdout = '';
+    let settled = false;
+    let child: ChildProcess;
+
+    const finish = (version: string | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(version);
+    };
+
+    const timeout = setTimeout(() => {
+      child?.kill();
+      finish(null);
+    }, timeoutMs);
+
+    try {
+      child = spawn(binaryPath, ['--version'], {
+        env,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
+      });
+      child.stdout?.setEncoding('utf8');
+      child.stdout?.on('data', (chunk: string) => {
+        if (stdout.length < 1024) stdout += chunk;
+      });
+      child.once('error', () => finish(null));
+      child.once('close', (code) => finish(code === 0 ? stdout.trim() || null : null));
+    } catch {
+      finish(null);
+    }
+  });
+}
 
 export class YtDlpController {
   private static videoInfoCache: Map<string, { info: VideoInfo; expiresAt: number }> = new Map();
   private static videoInfoRequests: Map<string, Promise<VideoInfo>> = new Map();
-  private static ytdlpVersionCache: Map<string, string | null> = new Map();
+  private static ytdlpVersionCache: Map<string, Promise<string | null>> = new Map();
 
   private ytdlpPath: string;
   private ffmpegPath: string;
@@ -92,6 +133,7 @@ export class YtDlpController {
   private nodeRuntimePath: string | null = null;
   private potProviderServerHome: string | null = null;
   private ytdlpVersion: string | null = null;
+  private versionProbeGeneration = 0;
 
   constructor() {
     this.ytdlpPath = this.resolveBinaryPath('yt-dlp');
@@ -123,6 +165,7 @@ export class YtDlpController {
    * repairs a damaged managed binary. MYTUBE_BIN_DIR pins the binary for tests.
    */
   private initializeYtDlpBinary(): void {
+    const probeGeneration = ++this.versionProbeGeneration;
     const bundledPath = this.resolveBinaryPath('yt-dlp');
     this.ytdlpPath = bundledPath;
     this.binariesAvailable = fs.existsSync(bundledPath);
@@ -131,7 +174,7 @@ export class YtDlpController {
       const managedDir = getManagedYtDlpDir(app.getPath('userData'));
       const managedPath = getManagedYtDlpPath(managedDir);
       if (fs.existsSync(managedPath)) {
-        const managedVersion = readManagedYtDlpVersion(managedDir) || this.detectYtDlpVersion(managedPath);
+        const managedVersion = readManagedYtDlpVersion(managedDir);
         if (managedVersion) {
           this.ytdlpPath = managedPath;
           this.binariesAvailable = true;
@@ -147,7 +190,16 @@ export class YtDlpController {
       this.ytdlpVersion = null;
       return;
     }
-    this.ytdlpVersion = this.detectYtDlpVersion(bundledPath);
+    this.ytdlpVersion = null;
+    void this.detectYtDlpVersion(bundledPath).then((version) => {
+      if (probeGeneration !== this.versionProbeGeneration || bundledPath !== this.ytdlpPath) return;
+      this.ytdlpVersion = version;
+      if (version) {
+        log.info(`yt-dlp version: ${version}`);
+      } else {
+        log.warn('Unable to detect yt-dlp version in the background');
+      }
+    });
   }
 
   /** Re-resolve the yt-dlp binary (called after a runtime update lands). */
@@ -230,26 +282,13 @@ export class YtDlpController {
     return null;
   }
 
-  private detectYtDlpVersion(binaryPath: string): string | null {
-    if (YtDlpController.ytdlpVersionCache.has(binaryPath)) {
-      return YtDlpController.ytdlpVersionCache.get(binaryPath) || null;
-    }
+  private detectYtDlpVersion(binaryPath: string): Promise<string | null> {
+    const cached = YtDlpController.ytdlpVersionCache.get(binaryPath);
+    if (cached) return cached;
 
-    const result = spawnSync(binaryPath, ['--version'], {
-      encoding: 'utf8',
-      timeout: 2000,
-      env: this.getYtDlpEnvironment(),
-    });
-
-    if (result.error || result.status !== 0) {
-      log.warn('Unable to detect yt-dlp version:', result.error?.message || result.stderr?.trim() || result.status);
-      YtDlpController.ytdlpVersionCache.set(binaryPath, null);
-      return null;
-    }
-
-    const version = result.stdout.trim() || null;
-    YtDlpController.ytdlpVersionCache.set(binaryPath, version);
-    return version;
+    const probe = probeYtDlpVersion(binaryPath, this.getYtDlpEnvironment());
+    YtDlpController.ytdlpVersionCache.set(binaryPath, probe);
+    return probe;
   }
 
   private getYtDlpEnvironment(): NodeJS.ProcessEnv {
