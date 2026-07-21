@@ -7,6 +7,9 @@ import { VideoInfo, VideoFormat } from '../../shared/types';
 import log from 'electron-log/main';
 import { classifyMediaUrl } from './MediaUrlClassifier';
 import { getManagedYtDlpDir, getManagedYtDlpPath, readManagedYtDlpVersion } from './YtDlpUpdater';
+import { probeYtDlpVersion } from './YtDlpProcess';
+
+export { probeYtDlpVersion } from './YtDlpProcess';
 
 export interface DownloadOptions {
   formatId?: string;
@@ -79,47 +82,6 @@ const DEFAULT_BROWSER_USER_AGENT = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15
 const VIDEO_INFO_CACHE_TTL_MS = 5 * 60 * 1000;
 const METADATA_MAX_RUNTIME_MS = 10 * 60 * 1000;
 const METADATA_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
-const VERSION_PROBE_TIMEOUT_MS = 2_000;
-
-export function probeYtDlpVersion(
-  binaryPath: string,
-  env: NodeJS.ProcessEnv,
-  timeoutMs = VERSION_PROBE_TIMEOUT_MS,
-): Promise<string | null> {
-  return new Promise((resolve) => {
-    let stdout = '';
-    let settled = false;
-    let child: ChildProcess;
-
-    const finish = (version: string | null): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      resolve(version);
-    };
-
-    const timeout = setTimeout(() => {
-      child?.kill();
-      finish(null);
-    }, timeoutMs);
-
-    try {
-      child = spawn(binaryPath, ['--version'], {
-        env,
-        stdio: ['ignore', 'pipe', 'ignore'],
-        windowsHide: true,
-      });
-      child.stdout?.setEncoding('utf8');
-      child.stdout?.on('data', (chunk: string) => {
-        if (stdout.length < 1024) stdout += chunk;
-      });
-      child.once('error', () => finish(null));
-      child.once('close', (code) => finish(code === 0 ? stdout.trim() || null : null));
-    } catch {
-      finish(null);
-    }
-  });
-}
 
 export class YtDlpController {
   private static videoInfoCache: Map<string, { info: VideoInfo; expiresAt: number }> = new Map();

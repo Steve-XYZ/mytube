@@ -1,9 +1,9 @@
-import { spawnSync } from 'child_process';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { writeFileAtomic } from '../utils/fsAtomic';
+import { writeFileAtomicAsync } from '../utils/fsAtomic';
 import log from 'electron-log/main';
+import { probeYtDlpVersion } from './YtDlpProcess';
 
 // Installed apps ship a yt-dlp snapshot, but YouTube changes frequently break
 // old versions. This updater downloads the latest official release binary into
@@ -30,12 +30,14 @@ export function readManagedYtDlpVersion(managedDir: string): string | null {
   try {
     const raw = fs.readFileSync(path.join(managedDir, 'update-state.json'), 'utf-8');
     const state = JSON.parse(raw) as UpdaterState;
-    return typeof state.version === 'string' && /^\d{4}\.\d{2}\.\d{2}(?:\.\d+)?$/.test(state.version)
-      ? state.version
-      : null;
+    return getValidYtDlpVersion(state.version);
   } catch {
     return null;
   }
+}
+
+function getValidYtDlpVersion(version: unknown): string | null {
+  return typeof version === 'string' && /^\d{4}\.\d{2}\.\d{2}(?:\.\d+)?$/.test(version) ? version : null;
 }
 
 /** Compare date-based yt-dlp versions like "2026.06.09" or "2026.06.09.1". */
@@ -127,7 +129,7 @@ export class YtDlpUpdater {
       return { status: 'throttled' };
     }
 
-    const state = this.readState();
+    const state = await this.readState();
     if (!force && state.lastCheckAt && Date.now() - state.lastCheckAt < this.minCheckSpacingMs) {
       return { status: 'throttled' };
     }
@@ -151,16 +153,17 @@ export class YtDlpUpdater {
       throw new Error('latest release feed did not contain a version tag');
     }
 
-    this.writeState({ ...state, lastCheckAt: Date.now() });
+    await this.writeState({ ...state, lastCheckAt: Date.now() });
 
     const currentVersion = this.currentVersionProvider();
     if (currentVersion && compareYtDlpVersions(latestVersion, currentVersion) <= 0) {
       const managedPath = getManagedYtDlpPath(this.managedDir, this.platform);
-      const managedStateVersion = readManagedYtDlpVersion(this.managedDir);
+      const managedStateVersion = getValidYtDlpVersion(state.version);
+      const managedBinaryExists = await this.fileExists(managedPath);
       if (
         !managedStateVersion ||
-        !fs.existsSync(managedPath) ||
-        this.probeBinaryVersion(managedPath) === currentVersion
+        !managedBinaryExists ||
+        (await this.probeBinaryVersion(managedPath)) === currentVersion
       ) {
         log.info(`yt-dlp is up to date (${currentVersion})`);
         return { status: 'up-to-date', version: currentVersion };
@@ -195,26 +198,26 @@ export class YtDlpUpdater {
 
     const finalPath = getManagedYtDlpPath(this.managedDir, this.platform);
     const stagingPath = `${finalPath}.download`;
-    fs.mkdirSync(this.managedDir, { recursive: true });
+    await fs.promises.mkdir(this.managedDir, { recursive: true });
 
     try {
-      fs.writeFileSync(stagingPath, binary);
-      fs.chmodSync(stagingPath, 0o755);
+      await fs.promises.writeFile(stagingPath, binary);
+      await fs.promises.chmod(stagingPath, 0o755);
 
-      const probedVersion = this.probeBinaryVersion(stagingPath);
+      const probedVersion = await this.probeBinaryVersion(stagingPath);
       if (probedVersion !== latestVersion) {
         throw new Error(
           `downloaded binary reported version "${probedVersion ?? 'unknown'}" instead of "${latestVersion}"`,
         );
       }
 
-      fs.renameSync(stagingPath, finalPath);
+      await fs.promises.rename(stagingPath, finalPath);
     } catch (err) {
-      fs.rmSync(stagingPath, { force: true });
+      await fs.promises.rm(stagingPath, { force: true });
       throw err;
     }
 
-    this.writeState({ version: latestVersion, installedAt: Date.now(), lastCheckAt: Date.now() });
+    await this.writeState({ version: latestVersion, installedAt: Date.now(), lastCheckAt: Date.now() });
     log.info(`yt-dlp updated to ${latestVersion}: ${finalPath}`);
     this.onUpdated?.(finalPath, latestVersion);
     return { status: 'updated', version: latestVersion };
@@ -231,22 +234,17 @@ export class YtDlpUpdater {
     }
   }
 
-  private probeBinaryVersion(binaryPath: string): string | null {
-    const result = spawnSync(binaryPath, ['--version'], {
-      encoding: 'utf8',
-      timeout: VERSION_PROBE_TIMEOUT_MS,
-    });
-    if (result.error || result.status !== 0) return null;
-    return result.stdout.trim() || null;
+  private probeBinaryVersion(binaryPath: string): Promise<string | null> {
+    return probeYtDlpVersion(binaryPath, process.env, VERSION_PROBE_TIMEOUT_MS);
   }
 
   private stateFilePath(): string {
     return path.join(this.managedDir, 'update-state.json');
   }
 
-  private readState(): UpdaterState {
+  private async readState(): Promise<UpdaterState> {
     try {
-      const raw = fs.readFileSync(this.stateFilePath(), 'utf-8');
+      const raw = await fs.promises.readFile(this.stateFilePath(), 'utf-8');
       const parsed = JSON.parse(raw) as UpdaterState;
       return typeof parsed === 'object' && parsed !== null ? parsed : {};
     } catch {
@@ -254,11 +252,20 @@ export class YtDlpUpdater {
     }
   }
 
-  private writeState(state: UpdaterState): void {
+  private async writeState(state: UpdaterState): Promise<void> {
     try {
-      writeFileAtomic(this.stateFilePath(), JSON.stringify(state, null, 2));
+      await writeFileAtomicAsync(this.stateFilePath(), JSON.stringify(state, null, 2));
     } catch (err: unknown) {
       log.warn('Failed to persist yt-dlp updater state:', err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  private async fileExists(filePath: string): Promise<boolean> {
+    try {
+      await fs.promises.access(filePath);
+      return true;
+    } catch {
+      return false;
     }
   }
 
