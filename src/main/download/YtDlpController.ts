@@ -879,6 +879,9 @@ export class YtDlpController {
     error: string,
     profile: YtDlpExecutionProfile,
   ): boolean {
+    if (this.isTransientConnectivityError(error) || this.isRateLimitError(error) || this.isUpstreamError(error)) {
+      return false;
+    }
     if (!this.isYouTubeUrl(sourceUrl)) {
       return !profile.impersonate && this.isAntiBotError(error);
     }
@@ -901,20 +904,52 @@ export class YtDlpController {
   }
 
   private shouldTryNextProfile(sourceUrl: string, err: unknown, profile: YtDlpExecutionProfile): boolean {
+    const message = this.getErrorMessage(err);
+    if (this.isTransientConnectivityError(message) || this.isRateLimitError(message) || this.isUpstreamError(message)) {
+      return false;
+    }
     if (!this.isYouTubeUrl(sourceUrl)) {
-      return !profile.impersonate && this.isAntiBotError(this.getErrorMessage(err));
+      return !profile.impersonate && this.isAntiBotError(message);
     }
 
     if (!this.isYouTubeUrl(sourceUrl) || !this.potProviderServerHome || profile.usePotProvider) {
       return false;
     }
 
-    return this.isYouTubeTokenOrBotError(this.getErrorMessage(err));
+    return this.isYouTubeTokenOrBotError(message);
   }
 
   private getUserFacingExtractionError(err: unknown, sourceUrl: string): string {
     const message = this.getErrorMessage(err);
     const media = classifyMediaUrl(sourceUrl);
+
+    if (this.isMetadataAbortError(err)) {
+      return 'Metadata lookup was cancelled.';
+    }
+
+    if (this.isDnsError(message)) {
+      return 'MyTube could not resolve the site address. Check your internet connection, DNS settings, VPN, or firewall, then retry.';
+    }
+
+    if (this.isOfflineError(message)) {
+      return 'MyTube cannot reach the network. Check your internet connection, VPN, or firewall, then retry.';
+    }
+
+    if (this.isConnectionError(message)) {
+      return 'The connection to the site was interrupted or refused. Check the network and retry.';
+    }
+
+    if (this.isTimeoutError(message)) {
+      return 'The site did not respond in time. Check your connection and retry.';
+    }
+
+    if (this.isRateLimitError(message)) {
+      return 'The site temporarily rate-limited metadata requests. Wait a few minutes, then retry.';
+    }
+
+    if (this.isUpstreamError(message)) {
+      return 'The site is temporarily unavailable. Wait a moment and retry.';
+    }
 
     if (!media.isMediaPage) {
       return media.reason || 'Open a specific video, post, reel, or track before downloading.';
@@ -978,8 +1013,45 @@ export class YtDlpController {
   }
 
   private isAntiBotError(message: string): boolean {
-    return /captcha|cloudflare|too many requests|http error 429|http error 403|forbidden|blocked|not a bot/i.test(
+    return /captcha|cloudflare|http error 403|forbidden|blocked|not a bot/i.test(message);
+  }
+
+  private isDnsError(message: string): boolean {
+    return /could not resolve|name or service not known|temporary failure in name resolution|getaddrinfo|enotfound|eai_again|err_name_not_resolved/i.test(
       message,
+    );
+  }
+
+  private isOfflineError(message: string): boolean {
+    return /network is unreachable|no route to host|enetunreach|ehostunreach|err_internet_disconnected|err_network_changed/i.test(
+      message,
+    );
+  }
+
+  private isConnectionError(message: string): boolean {
+    return /connection (?:was )?(?:reset|refused|closed|aborted)|econnreset|econnrefused|econnaborted|socket hang up|remote end closed|err_connection_(?:reset|refused|closed|aborted)/i.test(
+      message,
+    );
+  }
+
+  private isTimeoutError(message: string): boolean {
+    return /timed out|timeout|etimedout|err_timed_out|metadata extraction stalled/i.test(message);
+  }
+
+  private isRateLimitError(message: string): boolean {
+    return /http error 429|\b429\b.*too many requests|too many requests|rate[- ]limit/i.test(message);
+  }
+
+  private isUpstreamError(message: string): boolean {
+    return /http error 5\d\d|\b50[0-9]\b.*(?:server|gateway|service)|bad gateway|service unavailable/i.test(message);
+  }
+
+  private isTransientConnectivityError(message: string): boolean {
+    return (
+      this.isDnsError(message) ||
+      this.isOfflineError(message) ||
+      this.isConnectionError(message) ||
+      this.isTimeoutError(message)
     );
   }
 

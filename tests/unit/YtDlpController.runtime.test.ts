@@ -158,6 +158,7 @@ type ProfileProbe = {
   isAllowedDownloadHeader: (headerName: string) => boolean;
   ytdlpVersion: string | null;
   shouldRetryDownloadWithNextProfile: (url: string, error: string, profile: DownloadProfile) => boolean;
+  shouldTryNextProfile: (url: string, error: unknown, profile: DownloadProfile) => boolean;
   withCommonArgs: (
     args: string[],
     sourceUrl: string | undefined,
@@ -247,6 +248,15 @@ describe('YtDlpController download profile selection', () => {
     ).toBe(true);
     expect(p.shouldRetryDownloadWithNextProfile('https://vimeo.com/1', 'Unsupported URL', browserProfile)).toBe(false);
   });
+
+  it('does not retry metadata profiles immediately when the site rate-limits requests', () => {
+    const p = profileProbe('/pot');
+    expect(
+      p.shouldTryNextProfile('https://vimeo.com/1', new Error('HTTP Error 429: Too Many Requests'), {
+        name: 'browser-context',
+      }),
+    ).toBe(false);
+  });
 });
 
 describe('YtDlpController download argument building', () => {
@@ -306,6 +316,37 @@ describe('YtDlpController user-facing extraction errors', () => {
 
     expect(message).toContain('blocked the downloader');
     expect(message).toContain('complete any challenge');
+  });
+
+  it('classifies DNS failures without exposing extractor internals', () => {
+    const message = profileProbe('/pot').getUserFacingExtractionError(
+      new Error('Unable to download webpage: [Errno -2] Name or service not known'),
+      'https://vimeo.com/123',
+    );
+
+    expect(message).toContain('could not resolve the site address');
+    expect(message).toContain('DNS');
+    expect(message).not.toContain('Errno');
+  });
+
+  it('distinguishes timeouts from unsupported media', () => {
+    const message = profileProbe('/pot').getUserFacingExtractionError(
+      new Error('yt-dlp metadata extraction timed out after 60000 ms'),
+      'https://vimeo.com/123',
+    );
+
+    expect(message).toContain('did not respond in time');
+    expect(message).toContain('retry');
+  });
+
+  it('asks the user to wait after a rate limit instead of retrying a browser fallback', () => {
+    const message = profileProbe('/pot').getUserFacingExtractionError(
+      new Error('HTTP Error 429: Too Many Requests'),
+      'https://vimeo.com/123',
+    );
+
+    expect(message).toContain('temporarily rate-limited');
+    expect(message).toContain('Wait a few minutes');
   });
 
   it('uses the site origin as referer for non-YouTube URLs', () => {
