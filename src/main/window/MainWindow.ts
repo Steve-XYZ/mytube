@@ -181,7 +181,7 @@ export class MainWindow {
       this.window.show();
 
       // Check for updates after launch (only in production)
-      if (!process.env.VITE_DEV_SERVER_URL && process.env.NODE_ENV !== 'development') {
+      if (this.autoUpdater.isEnabled() && !process.env.VITE_DEV_SERVER_URL && process.env.NODE_ENV !== 'development') {
         setTimeout(() => this.autoUpdater.checkForUpdates(), 5000);
       }
     });
