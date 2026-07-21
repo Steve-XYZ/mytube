@@ -9,6 +9,7 @@ import {
   clipboard,
   dialog,
   type BrowserWindow,
+  type WebRequestFilter,
 } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -51,6 +52,10 @@ const MAX_PENDING_MEDIA_REQUESTS = 200;
 const CAPTURED_MEDIA_TTL_MS = 10 * 60 * 1000;
 const PASSIVE_METADATA_MAX_RUNTIME_MS = 30_000;
 const PASSIVE_METADATA_IDLE_TIMEOUT_MS = 10_000;
+const MEDIA_CAPTURE_FILTER: WebRequestFilter = {
+  urls: ['http://*/*', 'https://*/*'],
+  types: ['media', 'xhr'],
+};
 
 interface MediaRequestDetails {
   id: number;
@@ -105,6 +110,8 @@ export class TabManager implements MediaFallbackProvider {
   private destroyed = false;
   private visitRecorder?: VisitRecorder;
   private unsubscribeSettings?: () => void;
+  private mediaCaptureEventCount = 0;
+  private mediaCaptureProcessingMs = 0;
 
   constructor(
     window: BaseWindow,
@@ -171,16 +178,31 @@ export class TabManager implements MediaFallbackProvider {
   }
 
   private setupMediaRequestCapture(): void {
-    session.defaultSession.webRequest.onBeforeSendHeaders((details: MediaRequestDetails, callback) => {
-      this.captureMediaRequest(details);
-      callback({ requestHeaders: details.requestHeaders || {} });
+    session.defaultSession.webRequest.onBeforeSendHeaders(
+      MEDIA_CAPTURE_FILTER,
+      (details: MediaRequestDetails, callback) => {
+        this.measureMediaCapture(() => this.captureMediaRequest(details));
+        callback({ requestHeaders: details.requestHeaders || {} });
+      },
+    );
+    session.defaultSession.webRequest.onResponseStarted(MEDIA_CAPTURE_FILTER, (details: MediaRequestDetails) => {
+      this.measureMediaCapture(() => this.captureMediaResponse(details));
     });
-    session.defaultSession.webRequest.onResponseStarted((details: MediaRequestDetails) => {
-      this.captureMediaResponse(details);
+    session.defaultSession.webRequest.onErrorOccurred(MEDIA_CAPTURE_FILTER, (details: MediaRequestDetails) => {
+      this.measureMediaCapture(() => this.pendingMediaRequests.delete(details.id));
     });
-    session.defaultSession.webRequest.onErrorOccurred((details: MediaRequestDetails) => {
-      this.pendingMediaRequests.delete(details.id);
-    });
+  }
+
+  private measureMediaCapture(operation: () => void): void {
+    const startedAt = performance.now();
+    operation();
+    this.mediaCaptureEventCount += 1;
+    this.mediaCaptureProcessingMs += performance.now() - startedAt;
+    if (this.mediaCaptureEventCount % 1_000 === 0) {
+      log.debug(
+        `[performance] media_capture events=${this.mediaCaptureEventCount} processing_ms=${this.mediaCaptureProcessingMs.toFixed(1)} pending=${this.pendingMediaRequests.size}`,
+      );
+    }
   }
 
   // ==================== Tab Lifecycle ====================
@@ -579,13 +601,15 @@ export class TabManager implements MediaFallbackProvider {
       this.logNavigationTiming(managedTab, 'completed');
     });
 
-    // Log console errors from tab pages (helps debug video playback issues)
-    wc.on('console-message', (_event, level, message) => {
-      // level: 0=verbose, 1=info, 2=warning, 3=error
-      if (level >= 2) {
-        log.warn(`[Tab ${info.id}] console.${level >= 3 ? 'error' : 'warn'}: ${message.slice(0, 200)}`);
-      }
-    });
+    // Page consoles are extremely noisy on ad-heavy sites. Keep them opt-in
+    // outside development so production logs retain actionable app signals.
+    if (process.env.NODE_ENV === 'development' || process.env.MYTUBE_LOG_PAGE_CONSOLE === '1') {
+      wc.on('console-message', (_event, level, message) => {
+        if (level >= 2) {
+          log.warn(`[Tab ${info.id}] console.${level >= 3 ? 'error' : 'warn'}: ${message.slice(0, 200)}`);
+        }
+      });
+    }
 
     wc.on('did-navigate', (_event, navUrl) => {
       managedTab.pendingMainFrameUrl = undefined;
