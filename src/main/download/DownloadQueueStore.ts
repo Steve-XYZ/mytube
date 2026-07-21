@@ -6,6 +6,45 @@ import log from 'electron-log/main';
 
 const SCHEMA_VERSION = 1;
 
+interface PersistedDownload {
+  id: string;
+  status: DownloadItem['status'];
+  queueOrder: number;
+  createdAt: number;
+  payload: string;
+}
+
+export interface DownloadPersistencePlan {
+  upserts: PersistedDownload[];
+  deletedIds: string[];
+  nextPayloads: Map<string, string>;
+}
+
+export function planDownloadPersistence(
+  previousPayloads: ReadonlyMap<string, string>,
+  items: DownloadItem[],
+): DownloadPersistencePlan {
+  const upserts: PersistedDownload[] = [];
+  const nextPayloads = new Map<string, string>();
+
+  for (const item of items) {
+    const payload = JSON.stringify({ ...item, speed: undefined, eta: undefined });
+    nextPayloads.set(item.id, payload);
+    if (previousPayloads.get(item.id) === payload) continue;
+
+    upserts.push({
+      id: item.id,
+      status: item.status,
+      queueOrder: item.queueOrder ?? item.createdAt,
+      createdAt: item.createdAt,
+      payload,
+    });
+  }
+
+  const deletedIds = Array.from(previousPayloads.keys()).filter((id) => !nextPayloads.has(id));
+  return { upserts, deletedIds, nextPayloads };
+}
+
 export interface DownloadStateStore {
   load(): DownloadItem[];
   save(items: DownloadItem[]): void;
@@ -14,6 +53,7 @@ export interface DownloadStateStore {
 
 export class SqliteDownloadStateStore implements DownloadStateStore {
   private readonly db: Database.Database;
+  private persistedPayloads = new Map<string, string>();
   private closed = false;
 
   constructor(
@@ -23,8 +63,10 @@ export class SqliteDownloadStateStore implements DownloadStateStore {
     fs.mkdirSync(path.dirname(databasePath), { recursive: true });
     this.db = new Database(databasePath);
     this.db.pragma('journal_mode = WAL');
+    this.db.pragma('synchronous = NORMAL');
     this.db.pragma('foreign_keys = ON');
     this.initializeSchema();
+    this.persistedPayloads = this.readPersistedPayloads();
     this.importLegacyJsonOnce();
   }
 
@@ -45,25 +87,32 @@ export class SqliteDownloadStateStore implements DownloadStateStore {
   }
 
   save(items: DownloadItem[]): void {
-    const insert = this.db.prepare(`
+    const { upserts, deletedIds, nextPayloads } = planDownloadPersistence(this.persistedPayloads, items);
+    if (upserts.length === 0 && deletedIds.length === 0) return;
+
+    const upsert = this.db.prepare(`
       INSERT INTO downloads (id, status, queue_order, created_at, updated_at, payload)
       VALUES (@id, @status, @queueOrder, @createdAt, @updatedAt, @payload)
+      ON CONFLICT(id) DO UPDATE SET
+        status = excluded.status,
+        queue_order = excluded.queue_order,
+        created_at = excluded.created_at,
+        updated_at = excluded.updated_at,
+        payload = excluded.payload
     `);
-    const saveAll = this.db.transaction((downloads: DownloadItem[]) => {
-      this.db.prepare('DELETE FROM downloads').run();
+    const deleteById = this.db.prepare('DELETE FROM downloads WHERE id = ?');
+    const persistChanges = this.db.transaction(() => {
       const updatedAt = Date.now();
-      for (const item of downloads) {
-        insert.run({
-          id: item.id,
-          status: item.status,
-          queueOrder: item.queueOrder ?? item.createdAt,
-          createdAt: item.createdAt,
+      for (const id of deletedIds) deleteById.run(id);
+      for (const item of upserts) {
+        upsert.run({
+          ...item,
           updatedAt,
-          payload: JSON.stringify({ ...item, speed: undefined, eta: undefined }),
         });
       }
     });
-    saveAll(items);
+    persistChanges();
+    this.persistedPayloads = nextPayloads;
   }
 
   close(): void {
@@ -94,6 +143,14 @@ export class SqliteDownloadStateStore implements DownloadStateStore {
     this.db
       .prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)')
       .run('schema_version', String(SCHEMA_VERSION));
+  }
+
+  private readPersistedPayloads(): Map<string, string> {
+    const rows = this.db.prepare('SELECT id, payload FROM downloads').all() as Array<{
+      id: string;
+      payload: string;
+    }>;
+    return new Map(rows.map((row) => [row.id, row.payload]));
   }
 
   private importLegacyJsonOnce(): void {
