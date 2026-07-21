@@ -65,6 +65,30 @@ const PAGES: Record<string, string> = {
     </a>
   </body>
 </html>`,
+  '/semantic-media-page': `<!doctype html>
+<html>
+  <head>
+    <title>E2E Semantic Media Page</title>
+    <script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"VideoObject","name":"Semantic media"}
+    </script>
+  </head>
+  <body>
+    <h1 id="heading">Semantic Media Page</h1>
+    <video id="semantic-video" src="/media/feed.mp4" width="640" height="360" muted autoplay controls></video>
+  </body>
+</html>`,
+  '/open-graph-media-page': `<!doctype html>
+<html>
+  <head>
+    <title>E2E Open Graph Media Page</title>
+    <meta property="og:type" content="video.other">
+  </head>
+  <body>
+    <h1 id="heading">Open Graph Media Page</h1>
+    <video id="open-graph-video" src="/media/feed.mp4" width="640" height="360" muted autoplay controls></video>
+  </body>
+</html>`,
   '/oauth-opener': `<!doctype html>
 <html>
   <head><title>OAuth opener</title></head>

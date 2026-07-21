@@ -138,10 +138,14 @@ export default function App() {
 
   const handleStartDownload = useCallback(
     async (url: string, options: { formatId?: string; audioOnly?: boolean; title?: string }) => {
-      await window.electronAPI.startDownload(url, options);
-      setDownloadPanelVisible(true);
+      try {
+        await window.electronAPI.startDownload(url, options);
+        addToast('info', `Added to queue: ${options.title || 'media'}`);
+      } catch (error) {
+        addToast('error', error instanceof Error ? error.message : 'Could not add this download');
+      }
     },
-    [],
+    [addToast],
   );
 
   const handleToggleDownloadPanel = useCallback(() => {

@@ -51,6 +51,24 @@ describe('resolveDownloadTarget', () => {
     });
   });
 
+  it('keeps an unknown media page when the document exposes strong media metadata', () => {
+    const pageUrl = 'https://video.example.com/watch/episode-26';
+    const result = resolveDownloadTarget(pageUrl, {
+      hasPageMediaMetadata: true,
+      mediaUrl: 'https://cdn.example.com/temporary-source.mp4?token=secret',
+    });
+
+    expect(result).toMatchObject({ pageUrl, url: pageUrl, source: 'page' });
+  });
+
+  it('still uses active media on an unknown browsing page without media metadata', () => {
+    const pageUrl = 'https://video.example.com/feed';
+    const mediaUrl = 'https://cdn.example.com/active-video.mp4?token=secret';
+    const result = resolveDownloadTarget(pageUrl, { hasPageMediaMetadata: false, mediaUrl });
+
+    expect(result).toMatchObject({ pageUrl, url: mediaUrl, source: 'active-media' });
+  });
+
   it('preserves captured browser context for the active direct media URL', () => {
     const fallback = captured('https://cdn.example.com/reel.mp4?token=secret');
     const result = resolveDownloadTarget(

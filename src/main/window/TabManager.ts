@@ -14,12 +14,7 @@ import {
 import * as fs from 'fs';
 import * as path from 'path';
 import { TabInfo, IPC_CHANNELS, FindInPageResult } from '../../shared/types';
-import {
-  DEFAULT_URL,
-  HEADER_HEIGHT,
-  SIDEBAR_WIDTH_COLLAPSED,
-  SIDEBAR_WIDTH_EXPANDED,
-} from '../../shared/constants';
+import { DEFAULT_URL, HEADER_HEIGHT, SIDEBAR_WIDTH_COLLAPSED, SIDEBAR_WIDTH_EXPANDED } from '../../shared/constants';
 import type { SettingsManager } from '../settings/SettingsManager';
 import { writeFileAtomic } from '../utils/fsAtomic';
 import { YtDlpController } from '../download/YtDlpController';
@@ -1247,10 +1242,20 @@ export class TabManager implements MediaFallbackProvider {
 
       const canonical = document.querySelector('link[rel="canonical"]')?.getAttribute('href')
         || document.querySelector('meta[property="og:url"]')?.getAttribute('content');
+      const openGraphType = document.querySelector('meta[property="og:type"]')?.getAttribute('content')?.toLowerCase();
+      const hasOpenGraphMedia = openGraphType?.startsWith('video')
+        || openGraphType?.startsWith('audio')
+        || Boolean(document.querySelector('meta[property^="og:video"], meta[property^="og:audio"]'));
+      const hasPlayerCard = Boolean(document.querySelector(
+        'meta[name="twitter:player"], meta[name="twitter:card"][content="player"]',
+      ));
+      const hasStructuredMedia = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
+        .some((script) => /"@type"\\s*:\\s*(?:\\[\\s*)?"(?:VideoObject|AudioObject)"/i.test(script.textContent || ''));
       return {
         canonicalUrl: absoluteUrl(canonical),
         permalinkUrls,
         mediaUrl: absoluteUrl(active?.video.currentSrc || active?.video.src),
+        hasPageMediaMetadata: Boolean(hasOpenGraphMedia || hasPlayerCard || hasStructuredMedia),
         title: document.title || undefined,
       };
     })()`;

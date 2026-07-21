@@ -44,6 +44,10 @@ export function classifyMediaUrl(url: string): MediaUrlClassification {
       return classifyRedditUrl(pathname);
     }
 
+    if (host === 'tokyvideo.com') {
+      return classifyPathBasedPlatform('tokyvideo', pathname, /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?video\/[^/]+/i);
+    }
+
     if (host === 'vimeo.com' || host.endsWith('.vimeo.com')) {
       return classifyPathBasedPlatform('vimeo', pathname, /^\/(?:\d+|channels\/[^/]+\/\d+|groups\/[^/]+\/videos\/\d+)/);
     }

@@ -7,6 +7,7 @@ export interface ActiveMediaSnapshot {
   canonicalUrl?: string;
   permalinkUrls?: string[];
   mediaUrl?: string;
+  hasPageMediaMetadata?: boolean;
   title?: string;
 }
 
@@ -28,7 +29,7 @@ export function resolveDownloadTarget(
   snapshot?: ActiveMediaSnapshot | null,
   capturedCandidates: CapturedMediaFallback[] = [],
 ): DownloadTarget {
-  if (isLikelyMediaUrl(pageUrl)) {
+  if (isLikelyMediaUrl(pageUrl) || snapshot?.hasPageMediaMetadata) {
     return { pageUrl, url: pageUrl, source: 'page', title: snapshot?.title };
   }
 

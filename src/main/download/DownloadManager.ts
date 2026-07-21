@@ -7,7 +7,7 @@ import { YtDlpController, DownloadOptions, DownloadProgress } from './YtDlpContr
 import type { DownloadTarget } from './DownloadTargetResolver';
 import type { CapturedMediaFallback, MediaFallbackProvider } from './MediaFallbackProvider';
 import type { SettingsManager } from '../settings/SettingsManager';
-import { writeFileAtomic } from '../utils/fsAtomic';
+import { SqliteDownloadStateStore, type DownloadStateStore } from './DownloadQueueStore';
 import log from 'electron-log/main';
 
 type WebContentsSender = { send: (channel: string, ...args: unknown[]) => void };
@@ -28,17 +28,22 @@ export class DownloadManager {
   private appViewSender: WebContentsSender;
   private maxConcurrent = 3;
   private defaultDownloadDir: string;
-  private stateFilePath: string;
+  private stateStore: DownloadStateStore;
   private settingsManager?: SettingsManager;
   private mediaFallbackProvider?: MediaFallbackProvider;
   private downloadTargets: Map<string, DownloadTarget> = new Map();
   private resolvedTargetsByPageUrl: Map<string, { target: DownloadTarget; expiresAt: number }> = new Map();
   private lastProgressUpdate: Map<string, number> = new Map();
+  private attemptTokens: Map<string, number> = new Map();
+  private isDrainingQueue = false;
+  private destroyed = false;
+  private nextQueueOrder = 1;
 
   constructor(
     appViewSender: WebContentsSender,
     settingsManager?: SettingsManager,
     mediaFallbackProvider?: MediaFallbackProvider,
+    stateStore?: DownloadStateStore,
   ) {
     this.ytdlp = new YtDlpController();
     this.appViewSender = appViewSender;
@@ -57,10 +62,17 @@ export class DownloadManager {
         }
         if (key === 'downloads.maxConcurrent') {
           this.maxConcurrent = Math.max(1, Math.min(value as number, 10));
+          this.processQueue();
         }
       });
     }
-    this.stateFilePath = path.join(app.getPath('userData'), 'downloads.json');
+    const userDataDir = app.getPath('userData');
+    this.stateStore =
+      stateStore ||
+      new SqliteDownloadStateStore(
+        path.join(userDataDir, 'downloads.sqlite3'),
+        path.join(userDataDir, 'downloads.json'),
+      );
 
     // Ensure download directory exists
     if (!fs.existsSync(this.defaultDownloadDir)) {
@@ -69,6 +81,9 @@ export class DownloadManager {
 
     this.loadState();
     this.setupIpcHandlers();
+    setImmediate(() => {
+      if (!this.destroyed) this.processQueue();
+    });
   }
 
   private setupIpcHandlers(): void {
@@ -97,6 +112,14 @@ export class DownloadManager {
     ipcMain.handle(IPC_CHANNELS.DOWNLOAD_CANCEL, (_event, id: string) => {
       if (typeof id !== 'string') return false;
       return this.cancelDownload(id);
+    });
+
+    ipcMain.handle(IPC_CHANNELS.DOWNLOAD_PAUSE_ALL, () => this.pauseAllDownloads());
+    ipcMain.handle(IPC_CHANNELS.DOWNLOAD_RESUME_ALL, () => this.resumeAllDownloads());
+    ipcMain.handle(IPC_CHANNELS.DOWNLOAD_CANCEL_PENDING, () => this.cancelPendingDownloads());
+    ipcMain.handle(IPC_CHANNELS.DOWNLOAD_MOVE, (_event, id: string, direction: string) => {
+      if (typeof id !== 'string' || !['up', 'down', 'top', 'bottom'].includes(direction)) return false;
+      return this.moveDownload(id, direction as 'up' | 'down' | 'top' | 'bottom');
     });
 
     ipcMain.handle(IPC_CHANNELS.DOWNLOAD_LIST, () => {
@@ -166,7 +189,7 @@ export class DownloadManager {
 
     ipcMain.handle('download:clear-completed', () => {
       for (const [id, item] of this.downloads) {
-        if (item.status === 'completed' || item.status === 'failed') {
+        if (item.status === 'completed' || item.status === 'failed' || item.status === 'cancelled') {
           this.downloads.delete(id);
           this.downloadTargets.delete(id);
         }
@@ -178,13 +201,10 @@ export class DownloadManager {
 
   async startDownload(url: string, options?: StartDownloadOptions): Promise<DownloadItem> {
     const id = randomUUID();
-    const target = await this.resolveDownloadTarget(url, true);
-    this.resolvedTargetsByPageUrl.delete(url);
-
     const item: DownloadItem = {
       id,
-      url: target.url,
-      sourcePageUrl: target.url !== target.pageUrl ? target.pageUrl : undefined,
+      url,
+      sourcePageUrl: url,
       title: options?.title || 'Fetching info...',
       filename: '',
       savePath: '',
@@ -193,44 +213,92 @@ export class DownloadManager {
       progress: 0,
       format: options?.formatId,
       createdAt: Date.now(),
+      queueOrder: this.nextQueueOrder++,
     };
 
     this.downloads.set(id, item);
-    this.downloadTargets.set(id, target);
     this.notifyUpdate(item);
     this.saveState();
-
-    // Fetch video info for title if not provided
-    if (!options?.title) {
-      try {
-        const info = await this.ytdlp.getVideoInfo(target.url);
-        item.title = info.title;
-        item.thumbnail = info.thumbnail;
-        this.notifyUpdate(item);
-      } catch {
-        item.title = this.extractTitleFromUrl(url);
-      }
-    }
-
-    // Check concurrent limit
     this.processQueue();
 
     return item;
   }
 
   private processQueue(): void {
-    const activeCount = Array.from(this.downloads.values()).filter((d) => d.status === 'downloading').length;
+    if (this.isDrainingQueue) return;
+    this.isDrainingQueue = true;
 
-    if (activeCount >= this.maxConcurrent) return;
+    try {
+      for (;;) {
+        const activeCount = Array.from(this.downloads.values()).filter((d) => this.isActiveStatus(d.status)).length;
+        if (activeCount >= this.maxConcurrent) return;
 
-    const nextQueued = Array.from(this.downloads.values()).find((d) => d.status === 'queued');
+        const nextQueued = Array.from(this.downloads.values())
+          .filter((d) => d.status === 'queued')
+          .sort((a, b) => (a.queueOrder ?? a.createdAt) - (b.queueOrder ?? b.createdAt))[0];
+        if (!nextQueued) return;
 
-    if (!nextQueued) return;
-
-    this.executeDownload(nextQueued, this.downloadTargets.get(nextQueued.id)?.fallback);
+        this.prepareDownload(nextQueued);
+      }
+    } finally {
+      this.isDrainingQueue = false;
+    }
   }
 
-  private executeDownload(item: DownloadItem, fallback?: CapturedMediaFallback): void {
+  private prepareDownload(item: DownloadItem): void {
+    const attemptToken = (this.attemptTokens.get(item.id) || 0) + 1;
+    this.attemptTokens.set(item.id, attemptToken);
+    item.attempt = (item.attempt || 0) + 1;
+    item.status = 'resolving';
+    item.error = undefined;
+    this.notifyUpdate(item);
+    this.saveState();
+
+    void this.resolveAndExecute(item, attemptToken);
+  }
+
+  private async resolveAndExecute(item: DownloadItem, attemptToken: number): Promise<void> {
+    const pageUrl = item.sourcePageUrl || item.url;
+    try {
+      const useCached = item.attempt === 1;
+      const target = await this.resolveDownloadTarget(pageUrl, useCached);
+      if (this.attemptTokens.get(item.id) !== attemptToken) return;
+
+      item.url = target.url;
+      item.sourcePageUrl = target.pageUrl;
+      item.targetResolvedAt = Date.now();
+      this.downloadTargets.set(item.id, target);
+      if (item.title === 'Fetching info...') {
+        item.title = target.title || this.extractTitleFromUrl(pageUrl);
+        void this.hydrateMetadata(item, target.url, attemptToken);
+      }
+      this.executeDownload(item, target.fallback, attemptToken);
+    } catch (error) {
+      if (this.attemptTokens.get(item.id) !== attemptToken) return;
+      item.status = 'needs-refresh';
+      item.error = `Could not refresh this media source: ${getErrorMessage(error)}`;
+      this.downloadTargets.delete(item.id);
+      this.notifyUpdate(item);
+      this.saveState();
+      this.appViewSender.send(IPC_CHANNELS.DOWNLOAD_ERROR, { ...item });
+      this.processQueue();
+    }
+  }
+
+  private async hydrateMetadata(item: DownloadItem, url: string, attemptToken: number): Promise<void> {
+    try {
+      const info = await this.ytdlp.getVideoInfo(url);
+      if (this.attemptTokens.get(item.id) !== attemptToken) return;
+      item.title = info.title;
+      item.thumbnail = info.thumbnail;
+      this.notifyUpdate(item);
+      this.saveState();
+    } catch {
+      // The download itself remains authoritative; metadata is optional.
+    }
+  }
+
+  private executeDownload(item: DownloadItem, fallback: CapturedMediaFallback | undefined, attemptToken: number): void {
     // Verify download directory still exists before starting
     try {
       if (!fs.existsSync(this.defaultDownloadDir)) {
@@ -242,6 +310,7 @@ export class DownloadManager {
       item.error = 'Download directory is not accessible. Check settings.';
       this.downloadTargets.delete(item.id);
       this.notifyUpdate(item);
+      this.saveState();
       this.processQueue();
       return;
     }
@@ -249,6 +318,7 @@ export class DownloadManager {
     item.status = 'downloading';
     item.error = undefined;
     this.notifyUpdate(item);
+    this.saveState();
     this.updateDockBadge();
 
     const downloadUrl = fallback?.url || item.url;
@@ -272,6 +342,7 @@ export class DownloadManager {
       downloadOptions,
       // onProgress — throttled to avoid flooding IPC
       (progress: DownloadProgress) => {
+        if (this.attemptTokens.get(item.id) !== attemptToken) return;
         item.progress = progress.percent;
         item.speed = progress.speed;
         item.eta = progress.eta;
@@ -288,6 +359,7 @@ export class DownloadManager {
       },
       // onComplete
       (filePath: string) => {
+        if (this.attemptTokens.get(item.id) !== attemptToken) return;
         this.lastProgressUpdate.delete(item.id);
         this.downloadTargets.delete(item.id);
         item.status = 'completed';
@@ -308,6 +380,7 @@ export class DownloadManager {
       },
       // onError
       (error: string) => {
+        if (this.attemptTokens.get(item.id) !== attemptToken) return;
         this.lastProgressUpdate.delete(item.id);
         if (error === 'Download cancelled') {
           // Already handled by cancel
@@ -318,13 +391,14 @@ export class DownloadManager {
           const nextFallback = this.mediaFallbackProvider?.getMediaFallbackForPage(item.sourcePageUrl || item.url);
           if (nextFallback) {
             log.info(`Retrying download ${item.id} with captured media fallback`);
-            item.status = 'queued';
+            item.status = 'retrying';
             item.progress = 0;
             item.speed = undefined;
             item.eta = undefined;
             item.totalSize = undefined;
             this.notifyUpdate(item);
-            this.executeDownload(item, nextFallback);
+            this.saveState();
+            this.executeDownload(item, nextFallback, attemptToken);
             return;
           }
         }
@@ -345,37 +419,90 @@ export class DownloadManager {
 
   pauseDownload(id: string): boolean {
     const item = this.downloads.get(id);
-    if (!item || item.status !== 'downloading') return false;
-    this.ytdlp.cancel(id);
+    if (!item || (!this.isActiveStatus(item.status) && item.status !== 'queued')) return false;
+    if (this.isActiveStatus(item.status)) {
+      this.invalidateAttempt(id);
+      this.ytdlp.cancel(id);
+    }
+    this.downloadTargets.delete(id);
+    item.targetResolvedAt = undefined;
     item.status = 'paused';
     item.speed = undefined;
     item.eta = undefined;
-    this.notifyUpdate(item);
-    this.saveState();
-    return true;
-  }
-
-  resumeDownload(id: string): boolean {
-    const item = this.downloads.get(id);
-    if (!item || item.status !== 'paused') return false;
-    item.status = 'queued';
     this.notifyUpdate(item);
     this.saveState();
     this.processQueue();
     return true;
   }
 
+  pauseAllDownloads(): number {
+    let paused = 0;
+    for (const item of this.downloads.values()) {
+      if (!this.isActiveStatus(item.status) && item.status !== 'queued') continue;
+      if (this.isActiveStatus(item.status)) {
+        this.invalidateAttempt(item.id);
+        this.ytdlp.cancel(item.id);
+      }
+      this.downloadTargets.delete(item.id);
+      item.targetResolvedAt = undefined;
+      item.status = 'paused';
+      item.speed = undefined;
+      item.eta = undefined;
+      this.notifyUpdate(item);
+      paused += 1;
+    }
+    if (paused > 0) {
+      this.saveState();
+      this.updateDockBadge();
+    }
+    return paused;
+  }
+
+  resumeDownload(id: string): boolean {
+    const item = this.downloads.get(id);
+    if (!item || (item.status !== 'paused' && item.status !== 'needs-refresh')) return false;
+    item.status = 'queued';
+    item.queueOrder = this.nextQueueOrder++;
+    item.error = undefined;
+    this.notifyUpdate(item);
+    this.saveState();
+    this.processQueue();
+    return true;
+  }
+
+  resumeAllDownloads(): number {
+    const paused = Array.from(this.downloads.values())
+      .filter((item) => item.status === 'paused' || item.status === 'needs-refresh')
+      .sort((a, b) => (a.queueOrder ?? a.createdAt) - (b.queueOrder ?? b.createdAt));
+    for (const item of paused) {
+      item.status = 'queued';
+      item.queueOrder = this.nextQueueOrder++;
+      item.error = undefined;
+      item.targetResolvedAt = undefined;
+      this.downloadTargets.delete(item.id);
+      this.notifyUpdate(item);
+    }
+    if (paused.length > 0) {
+      this.saveState();
+      this.processQueue();
+    }
+    return paused.length;
+  }
+
   retryDownload(id: string): boolean {
     const item = this.downloads.get(id);
-    if (!item || item.status !== 'failed') return false;
+    if (!item || (item.status !== 'failed' && item.status !== 'needs-refresh')) return false;
 
     item.status = 'queued';
+    item.queueOrder = this.nextQueueOrder++;
     item.error = undefined;
     item.progress = 0;
     item.speed = undefined;
     item.eta = undefined;
     item.totalSize = undefined;
     item.downloadedSize = undefined;
+    item.targetResolvedAt = undefined;
+    this.downloadTargets.delete(id);
     this.notifyUpdate(item);
     this.saveState();
     this.processQueue();
@@ -384,14 +511,16 @@ export class DownloadManager {
 
   cancelDownload(id: string): boolean {
     const item = this.downloads.get(id);
-    if (!item) return false;
+    if (!item || item.status === 'completed' || item.status === 'cancelled') return false;
 
-    if (item.status === 'downloading') {
+    if (this.isActiveStatus(item.status)) {
+      this.invalidateAttempt(id);
       this.ytdlp.cancel(id);
     }
 
-    item.status = 'failed';
-    item.error = 'Cancelled';
+    item.status = 'cancelled';
+    item.error = undefined;
+    item.cancelledAt = Date.now();
     this.downloadTargets.delete(item.id);
     item.speed = undefined;
     item.eta = undefined;
@@ -401,12 +530,76 @@ export class DownloadManager {
     return true;
   }
 
+  cancelPendingDownloads(): number {
+    let cancelled = 0;
+    for (const item of this.downloads.values()) {
+      if (!['resolving', 'retrying', 'queued', 'paused', 'needs-refresh'].includes(item.status)) continue;
+      if (this.isActiveStatus(item.status)) {
+        this.invalidateAttempt(item.id);
+        this.ytdlp.cancel(item.id);
+      }
+      item.status = 'cancelled';
+      item.error = undefined;
+      item.cancelledAt = Date.now();
+      item.speed = undefined;
+      item.eta = undefined;
+      this.downloadTargets.delete(item.id);
+      this.notifyUpdate(item);
+      cancelled += 1;
+    }
+    if (cancelled > 0) {
+      this.saveState();
+      this.updateDockBadge();
+      this.processQueue();
+    }
+    return cancelled;
+  }
+
+  moveDownload(id: string, direction: 'up' | 'down' | 'top' | 'bottom'): boolean {
+    const queue = Array.from(this.downloads.values())
+      .filter((item) => item.status === 'queued')
+      .sort((a, b) => (a.queueOrder ?? a.createdAt) - (b.queueOrder ?? b.createdAt));
+    const index = queue.findIndex((item) => item.id === id);
+    if (index < 0 || queue.length < 2) return false;
+
+    let targetIndex = index;
+    if (direction === 'up') targetIndex = Math.max(0, index - 1);
+    if (direction === 'down') targetIndex = Math.min(queue.length - 1, index + 1);
+    if (direction === 'top') targetIndex = 0;
+    if (direction === 'bottom') targetIndex = queue.length - 1;
+    if (targetIndex === index) return false;
+
+    const [moved] = queue.splice(index, 1);
+    queue.splice(targetIndex, 0, moved);
+    const firstOrder = Math.min(...queue.map((item) => item.queueOrder ?? item.createdAt));
+    queue.forEach((item, queueIndex) => {
+      item.queueOrder = firstOrder + queueIndex;
+      this.notifyUpdate(item);
+    });
+    this.nextQueueOrder = Math.max(this.nextQueueOrder, firstOrder + queue.length);
+    this.saveState();
+    return true;
+  }
+
   getDownloadList(): DownloadItem[] {
-    return Array.from(this.downloads.values()).sort((a, b) => b.createdAt - a.createdAt);
+    const queue = Array.from(this.downloads.values())
+      .filter((item) => item.status === 'queued')
+      .sort((a, b) => (a.queueOrder ?? a.createdAt) - (b.queueOrder ?? b.createdAt));
+    const positions = new Map(queue.map((item, index) => [item.id, index + 1]));
+
+    return Array.from(this.downloads.values())
+      .sort((a, b) => {
+        const aQueued = this.isQueueStatus(a.status);
+        const bQueued = this.isQueueStatus(b.status);
+        if (aQueued !== bQueued) return aQueued ? -1 : 1;
+        return aQueued ? (a.queueOrder ?? a.createdAt) - (b.queueOrder ?? b.createdAt) : b.createdAt - a.createdAt;
+      })
+      .map((item) => ({ ...item, queuePosition: positions.get(item.id) }));
   }
 
   setMaxConcurrent(max: number): void {
     this.maxConcurrent = Math.max(1, Math.min(max, 10));
+    this.processQueue();
   }
 
   setDefaultDownloadDir(dir: string): void {
@@ -425,7 +618,7 @@ export class DownloadManager {
 
     const toRemove = all.slice(MAX_DOWNLOAD_HISTORY);
     for (const item of toRemove) {
-      if (item.status === 'completed' || item.status === 'failed') {
+      if (item.status === 'completed' || item.status === 'failed' || item.status === 'cancelled') {
         this.downloads.delete(item.id);
       }
     }
@@ -433,8 +626,14 @@ export class DownloadManager {
 
   private saveState(): void {
     try {
-      const items = Array.from(this.downloads.values()).map((d) => ({ ...d, speed: undefined, eta: undefined }));
-      writeFileAtomic(this.stateFilePath, JSON.stringify(items, null, 2));
+      const items = Array.from(this.downloads.values()).map((item) => ({
+        ...item,
+        url: item.sourcePageUrl || item.url,
+        targetResolvedAt: undefined,
+        speed: undefined,
+        eta: undefined,
+      }));
+      this.stateStore.save(items);
     } catch (err: unknown) {
       if (getErrorCode(err) === 'ENOSPC') {
         log.error('Disk full — cannot save download state');
@@ -446,42 +645,39 @@ export class DownloadManager {
 
   private loadState(): void {
     try {
-      if (fs.existsSync(this.stateFilePath)) {
-        const data = JSON.parse(fs.readFileSync(this.stateFilePath, 'utf-8'));
-        for (const item of data) {
-          if (!item || typeof item.id !== 'string') {
-            continue;
-          }
-          if (item.status === 'downloading') {
-            item.status = 'paused';
-          }
-          this.downloads.set(item.id, item);
+      const data = this.stateStore.load();
+      for (const item of data) {
+        if (!item || typeof item.id !== 'string') continue;
+        if (item.status === 'downloading' || item.status === 'resolving' || item.status === 'retrying') {
+          item.status = 'paused';
         }
-        log.info(`Loaded ${this.downloads.size} downloads from state`);
+        item.queueOrder ??= item.createdAt;
+        this.nextQueueOrder = Math.max(this.nextQueueOrder, item.queueOrder + 1);
+        this.downloads.set(item.id, item);
       }
+      log.info(`Loaded ${this.downloads.size} downloads from state`);
     } catch (err) {
       log.error('Failed to load download state:', err);
-      this.backupCorruptedState();
     }
   }
 
   // ==================== Helpers ====================
 
-  private backupCorruptedState(): void {
-    try {
-      if (fs.existsSync(this.stateFilePath)) {
-        const backupPath = `${this.stateFilePath}.corrupted.${Date.now()}`;
-        fs.copyFileSync(this.stateFilePath, backupPath);
-        fs.writeFileSync(this.stateFilePath, '[]');
-        log.info(`Corrupted download state backed up to: ${backupPath}`);
-      }
-    } catch (err: unknown) {
-      log.error('Failed to backup corrupted download state:', getErrorMessage(err));
-    }
-  }
-
   private notifyUpdate(item: DownloadItem): void {
     this.appViewSender.send(IPC_CHANNELS.DOWNLOAD_PROGRESS, { ...item });
+  }
+
+  private isActiveStatus(status: DownloadItem['status']): boolean {
+    return status === 'resolving' || status === 'downloading' || status === 'retrying';
+  }
+
+  private isQueueStatus(status: DownloadItem['status']): boolean {
+    return this.isActiveStatus(status) || status === 'queued' || status === 'paused' || status === 'needs-refresh';
+  }
+
+  private invalidateAttempt(id: string): void {
+    this.attemptTokens.set(id, (this.attemptTokens.get(id) || 0) + 1);
+    this.lastProgressUpdate.delete(id);
   }
 
   private showDownloadNotification(item: DownloadItem): void {
@@ -502,7 +698,7 @@ export class DownloadManager {
   private updateDockBadge(): void {
     if (process.platform !== 'darwin') return;
     const activeCount = Array.from(this.downloads.values()).filter(
-      (d) => d.status === 'downloading' || d.status === 'queued',
+      (d) => this.isActiveStatus(d.status) || d.status === 'queued',
     ).length;
     app.dock?.setBadge(activeCount > 0 ? String(activeCount) : '');
   }
@@ -555,10 +751,16 @@ export class DownloadManager {
   }
 
   destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
     this.ytdlp.cancelAll();
+    for (const id of this.downloads.keys()) {
+      this.invalidateAttempt(id);
+    }
     this.downloadTargets.clear();
     this.resolvedTargetsByPageUrl.clear();
     this.saveState();
+    this.stateStore.close();
     this.updateDockBadge();
 
     ipcMain.removeHandler(IPC_CHANNELS.DOWNLOAD_START);
@@ -566,6 +768,10 @@ export class DownloadManager {
     ipcMain.removeHandler(IPC_CHANNELS.DOWNLOAD_RESUME);
     ipcMain.removeHandler(IPC_CHANNELS.DOWNLOAD_RETRY);
     ipcMain.removeHandler(IPC_CHANNELS.DOWNLOAD_CANCEL);
+    ipcMain.removeHandler(IPC_CHANNELS.DOWNLOAD_PAUSE_ALL);
+    ipcMain.removeHandler(IPC_CHANNELS.DOWNLOAD_RESUME_ALL);
+    ipcMain.removeHandler(IPC_CHANNELS.DOWNLOAD_CANCEL_PENDING);
+    ipcMain.removeHandler(IPC_CHANNELS.DOWNLOAD_MOVE);
     ipcMain.removeHandler(IPC_CHANNELS.DOWNLOAD_LIST);
     ipcMain.removeHandler(IPC_CHANNELS.MEDIA_GET_INFO);
     ipcMain.removeHandler(IPC_CHANNELS.MEDIA_GET_FORMATS);

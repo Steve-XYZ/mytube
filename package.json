@@ -4,6 +4,7 @@
   "description": "Cross-platform web browser with video and image download capabilities",
   "main": "dist/main/index.js",
   "scripts": {
+    "postinstall": "electron-builder install-app-deps",
     "dev": "vite",
     "build": "tsc && vite build",
     "build:main": "tsc -p tsconfig.main.json",
@@ -11,7 +12,8 @@
     "build:renderer": "vite build",
     "build:all": "pnpm build:main && pnpm build:preload && pnpm build:renderer",
     "start": "pnpm build:all && electron .",
-    "dev:electron": "pnpm build:main && pnpm build:preload && concurrently \"vite\" \"wait-on http://localhost:5173 && VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "dev:electron": "pnpm rebuild:electron-native && pnpm build:main && pnpm build:preload && concurrently \"vite\" \"wait-on http://localhost:5173 && VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "rebuild:electron-native": "electron-builder install-app-deps",
     "pack": "pnpm build:all && electron-builder --dir",
     "dist": "pnpm build:all && electron-builder",
     "dist:mac": "pnpm build:all && pnpm run setup:bins:mac && pnpm run setup:pot && electron-builder --mac",
@@ -31,7 +33,7 @@
     "format:check": "prettier --check 'src/**/*.{ts,tsx}' 'tests/**/*.ts'",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "pnpm run build:all && playwright test",
+    "test:e2e": "pnpm run build:all && pnpm rebuild:electron-native && playwright test",
     "test:e2e:packaged": "node scripts/run-packaged-e2e.cjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -49,6 +51,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.61.1",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
@@ -70,6 +73,7 @@
     "wait-on": "^9.0.4"
   },
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
     "electron-log": "^5.4.3",
     "electron-updater": "^6.8.3"
   }

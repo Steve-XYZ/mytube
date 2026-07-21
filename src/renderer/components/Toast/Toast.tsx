@@ -14,7 +14,7 @@ interface ToastContainerProps {
 
 export function ToastContainer({ messages, onDismiss }: ToastContainerProps) {
   return (
-    <div className="toast-container">
+    <div className="toast-container" aria-live="polite" aria-relevant="additions removals">
       {messages.map((msg) => (
         <ToastItem key={msg.id} message={msg} onDismiss={onDismiss} />
       ))}
@@ -39,14 +39,17 @@ function ToastItem({ message, onDismiss }: { message: ToastMessage; onDismiss: (
   }, [message.id, onDismiss]);
 
   return (
-    <div className={`toast toast-${message.type} ${exiting ? 'toast-exit' : ''}`}>
+    <div
+      className={`toast toast-${message.type} ${exiting ? 'toast-exit' : ''}`}
+      role={message.type === 'error' ? 'alert' : 'status'}
+    >
       <span className="toast-icon">
         {message.type === 'error' && '!'}
         {message.type === 'success' && '\u2713'}
         {message.type === 'info' && 'i'}
       </span>
       <span className="toast-text">{message.text}</span>
-      <button className="toast-close" onClick={handleDismiss}>
+      <button className="toast-close" onClick={handleDismiss} aria-label="Dismiss notification">
         &times;
       </button>
     </div>

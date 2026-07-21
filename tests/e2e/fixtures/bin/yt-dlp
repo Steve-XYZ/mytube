@@ -34,6 +34,7 @@ function resolveVideoId(rawUrl) {
 
 const videoId = resolveVideoId(url);
 const title = `Mock Video ${videoId}`;
+const stepDelayMs = videoId.startsWith('queue') ? 500 : 80;
 
 if (has('--version')) {
   process.stdout.write('2026.06.09-mytube-e2e-mock\n');
@@ -113,5 +114,5 @@ const steps = [
 ];
 
 steps.forEach((step, index) => {
-  setTimeout(step, 80 * (index + 1));
+  setTimeout(step, stepDelayMs * (index + 1));
 });
