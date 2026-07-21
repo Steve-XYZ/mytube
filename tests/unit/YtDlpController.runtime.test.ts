@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { app } from 'electron';
 import { probeYtDlpVersion, YtDlpController } from '../../src/main/download/YtDlpController';
@@ -29,6 +31,49 @@ describe('YtDlpController version probing', () => {
 
     expect(settled).toBe(false);
     await expect(versionPromise).resolves.toBe(process.version);
+  });
+});
+
+describe('YtDlpController metadata cancellation', () => {
+  it('accepts per-request cancellation options', () => {
+    expect(YtDlpController.prototype.getVideoInfo.length).toBe(2);
+  });
+
+  it('terminates an in-flight metadata process when aborted', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytdlp-cancel-test-'));
+    const binaryPath = path.join(tempDir, 'yt-dlp');
+    fs.writeFileSync(binaryPath, "#!/bin/sh\ntrap 'exit 0' TERM\nwhile :; do sleep 1; done\n", { mode: 0o755 });
+    const controller = Object.create(YtDlpController.prototype) as {
+      ytdlpPath: string;
+      ffmpegPath: string;
+      execYtDlp(
+        args: string[],
+        sourceUrl: string | undefined,
+        profile: { name: string },
+        options: { signal: AbortSignal; maxRuntimeMs: number; idleTimeoutMs: number },
+      ): Promise<string>;
+    };
+    controller.ytdlpPath = binaryPath;
+    controller.ffmpegPath = tempDir;
+    const abortController = new AbortController();
+
+    try {
+      const request = controller.execYtDlp(
+        [],
+        undefined,
+        { name: 'test' },
+        {
+          signal: abortController.signal,
+          maxRuntimeMs: 5_000,
+          idleTimeoutMs: 5_000,
+        },
+      );
+      setTimeout(() => abortController.abort(), 20);
+
+      await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

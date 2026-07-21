@@ -76,12 +76,18 @@ interface YtDlpRequestContext {
   cookieSourceUrls?: string[];
 }
 
+export interface MetadataRequestOptions {
+  signal?: AbortSignal;
+  maxRuntimeMs?: number;
+  idleTimeoutMs?: number;
+}
+
 const DEFAULT_BROWSER_USER_AGENT = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${
   process.versions.chrome || '120.0.0.0'
 } Safari/537.36`;
 const VIDEO_INFO_CACHE_TTL_MS = 5 * 60 * 1000;
-const METADATA_MAX_RUNTIME_MS = 10 * 60 * 1000;
-const METADATA_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
+const METADATA_MAX_RUNTIME_MS = 60_000;
+const METADATA_IDLE_TIMEOUT_MS = 15_000;
 
 export class YtDlpController {
   private static videoInfoCache: Map<string, { info: VideoInfo; expiresAt: number }> = new Map();
@@ -305,13 +311,14 @@ export class YtDlpController {
       .replace(/'/g, '&#x27;');
   }
 
-  async getVideoInfo(url: string): Promise<VideoInfo> {
+  async getVideoInfo(url: string, options?: MetadataRequestOptions): Promise<VideoInfo> {
     if (!YtDlpController.validateUrl(url)) {
       throw new Error('Invalid URL: only http and https URLs are supported');
     }
     if (!this.binariesAvailable) {
       throw new Error('yt-dlp binary not found. Please reinstall the application.');
     }
+    this.throwIfMetadataAborted(options?.signal);
 
     const cacheKey = this.getInfoCacheKey(url);
     const cached = YtDlpController.videoInfoCache.get(cacheKey);
@@ -319,12 +326,13 @@ export class YtDlpController {
       return cached.info;
     }
 
-    const inFlight = YtDlpController.videoInfoRequests.get(cacheKey);
-    if (inFlight) {
-      return inFlight;
+    const canShareRequest = !options?.signal && !options?.maxRuntimeMs && !options?.idleTimeoutMs;
+    if (canShareRequest) {
+      const inFlight = YtDlpController.videoInfoRequests.get(cacheKey);
+      if (inFlight) return inFlight;
     }
 
-    const request = this.fetchVideoInfo(url).then((info) => {
+    const request = this.fetchVideoInfo(url, options).then((info) => {
       YtDlpController.videoInfoCache.set(cacheKey, {
         info,
         expiresAt: Date.now() + VIDEO_INFO_CACHE_TTL_MS,
@@ -332,24 +340,28 @@ export class YtDlpController {
       return info;
     });
 
-    YtDlpController.videoInfoRequests.set(cacheKey, request);
+    if (canShareRequest) YtDlpController.videoInfoRequests.set(cacheKey, request);
 
     try {
       return await request;
     } finally {
-      YtDlpController.videoInfoRequests.delete(cacheKey);
+      if (YtDlpController.videoInfoRequests.get(cacheKey) === request) {
+        YtDlpController.videoInfoRequests.delete(cacheKey);
+      }
     }
   }
 
-  private async fetchVideoInfo(url: string): Promise<VideoInfo> {
+  private async fetchVideoInfo(url: string, options?: MetadataRequestOptions): Promise<VideoInfo> {
     let output = '';
     let lastError: unknown;
 
     for (const profile of this.getExtractionProfiles(url)) {
+      this.throwIfMetadataAborted(options?.signal);
       try {
-        output = await this.execYtDlp(['--dump-json', '--no-playlist', '--no-warnings', url], url, profile);
+        output = await this.execYtDlp(['--dump-json', '--no-playlist', '--no-warnings', url], url, profile, options);
         break;
       } catch (err: unknown) {
+        if (this.isMetadataAbortError(err)) throw err;
         if (profile.impersonate && lastError && this.isImpersonationUnavailable(this.getErrorMessage(err))) {
           break;
         }
@@ -611,75 +623,111 @@ export class YtDlpController {
     this.activeProcesses.clear();
   }
 
-  private async execYtDlp(args: string[], sourceUrl?: string, profile?: YtDlpExecutionProfile): Promise<string> {
+  private async execYtDlp(
+    args: string[],
+    sourceUrl?: string,
+    profile?: YtDlpExecutionProfile,
+    options?: MetadataRequestOptions,
+  ): Promise<string> {
+    this.throwIfMetadataAborted(options?.signal);
+    const { args: fullArgs, cleanup } = await this.withCommonArgs(args, sourceUrl, profile);
+    if (options?.signal?.aborted) {
+      cleanup();
+      throw this.createMetadataAbortError();
+    }
+
     return new Promise((resolve, reject) => {
-      this.withCommonArgs(args, sourceUrl, profile)
-        .then(({ args: fullArgs, cleanup }) => {
-          const proc = spawn(this.ytdlpPath, fullArgs, {
-            stdio: ['ignore', 'pipe', 'pipe'],
-            env: this.getYtDlpEnvironment(),
-          });
+      const proc = spawn(this.ytdlpPath, fullArgs, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: this.getYtDlpEnvironment(),
+      });
+      const maxRuntimeMs = options?.maxRuntimeMs ?? METADATA_MAX_RUNTIME_MS;
+      const idleTimeoutMs = options?.idleTimeoutMs ?? METADATA_IDLE_TIMEOUT_MS;
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+      let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
-          let stdout = '';
-          let stderr = '';
-          let settled = false;
+      const terminate = (): void => {
+        proc.kill('SIGTERM');
+        const forceKillTimer = setTimeout(() => proc.kill('SIGKILL'), 2_000);
+        forceKillTimer.unref?.();
+      };
 
-          let idleTimer: ReturnType<typeof setTimeout> | null = null;
-          const maxRuntimeTimer = setTimeout(() => {
-            proc.kill('SIGTERM');
-            finish(() => reject(new Error('yt-dlp metadata extraction timed out after 10 minutes')));
-          }, METADATA_MAX_RUNTIME_MS);
+      const finish = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(maxRuntimeTimer);
+        if (idleTimer) clearTimeout(idleTimer);
+        options?.signal?.removeEventListener('abort', onAbort);
+        cleanup();
+        fn();
+      };
 
-          const finish = (fn: () => void) => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(maxRuntimeTimer);
-            if (idleTimer) clearTimeout(idleTimer);
-            cleanup();
-            fn();
-          };
+      const onAbort = (): void => {
+        terminate();
+        finish(() => reject(this.createMetadataAbortError()));
+      };
 
-          const resetIdleTimer = () => {
-            if (idleTimer) clearTimeout(idleTimer);
-            idleTimer = setTimeout(() => {
-              proc.kill('SIGTERM');
-              finish(() => reject(new Error('yt-dlp metadata extraction stalled with no output for 2 minutes')));
-            }, METADATA_IDLE_TIMEOUT_MS);
-          };
+      const maxRuntimeTimer = setTimeout(() => {
+        terminate();
+        finish(() => reject(new Error(`yt-dlp metadata extraction timed out after ${maxRuntimeMs} ms`)));
+      }, maxRuntimeMs);
 
-          resetIdleTimer();
+      const resetIdleTimer = (): void => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          terminate();
+          finish(() => reject(new Error(`yt-dlp metadata extraction stalled for ${idleTimeoutMs} ms`)));
+        }, idleTimeoutMs);
+      };
 
-          proc.stdout?.on('data', (data: Buffer) => {
-            stdout += data.toString();
-            resetIdleTimer();
-          });
+      options?.signal?.addEventListener('abort', onAbort, { once: true });
+      resetIdleTimer();
 
-          proc.stderr?.on('data', (data: Buffer) => {
-            stderr += this.redactSensitiveTextForLog(data.toString());
-            resetIdleTimer();
-          });
+      proc.stdout?.on('data', (data: Buffer) => {
+        stdout += data.toString();
+        resetIdleTimer();
+      });
 
-          proc.on('close', (code) => {
-            if (code === 0) {
-              finish(() => resolve(stdout.trim()));
-            } else {
-              finish(() => reject(new Error(`yt-dlp exited with code ${code}: ${stderr.trim()}`)));
-            }
-          });
+      proc.stderr?.on('data', (data: Buffer) => {
+        stderr += this.redactSensitiveTextForLog(data.toString());
+        resetIdleTimer();
+      });
 
-          proc.on('error', (err: NodeJS.ErrnoException) => {
-            if (err.code === 'ENOENT') {
-              this.binariesAvailable = false;
-              finish(() => reject(new Error('yt-dlp binary not found. Please reinstall the application.')));
-            } else {
-              finish(() => reject(new Error(`Failed to execute yt-dlp: ${err.message}`)));
-            }
-          });
-        })
-        .catch((err: unknown) => {
-          reject(err instanceof Error ? err : new Error(String(err)));
-        });
+      proc.on('close', (code) => {
+        if (code === 0) {
+          finish(() => resolve(stdout.trim()));
+        } else {
+          finish(() => reject(new Error(`yt-dlp exited with code ${code}: ${stderr.trim()}`)));
+        }
+      });
+
+      proc.on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'ENOENT') {
+          this.binariesAvailable = false;
+          finish(() => reject(new Error('yt-dlp binary not found. Please reinstall the application.')));
+        } else {
+          finish(() => reject(new Error(`Failed to execute yt-dlp: ${err.message}`)));
+        }
+      });
+
+      if (options?.signal?.aborted) onAbort();
     });
+  }
+
+  private createMetadataAbortError(): Error {
+    const error = new Error('yt-dlp metadata extraction cancelled');
+    error.name = 'AbortError';
+    return error;
+  }
+
+  private isMetadataAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === 'AbortError';
+  }
+
+  private throwIfMetadataAborted(signal?: AbortSignal): void {
+    if (signal?.aborted) throw this.createMetadataAbortError();
   }
 
   private async withCommonArgs(

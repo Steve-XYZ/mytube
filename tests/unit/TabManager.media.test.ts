@@ -111,3 +111,19 @@ describe('TabManager media request capture', () => {
     expect(probe.getMediaFallbackForPage(PAGE_URL)).toBeNull();
   });
 });
+
+describe('TabManager passive metadata cancellation', () => {
+  it('aborts and removes the active probe for a tab', () => {
+    const abortController = new AbortController();
+    const probe = Object.create(TabManager.prototype) as {
+      mediaDetectionAbort: Map<string, AbortController>;
+      cancelMediaProbe(tabId: string): void;
+    };
+    probe.mediaDetectionAbort = new Map([['tab-1', abortController]]);
+
+    probe.cancelMediaProbe('tab-1');
+
+    expect(abortController.signal.aborted).toBe(true);
+    expect(probe.mediaDetectionAbort.has('tab-1')).toBe(false);
+  });
+});

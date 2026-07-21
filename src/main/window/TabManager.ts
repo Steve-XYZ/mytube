@@ -48,6 +48,8 @@ const SESSION_SAVE_DEBOUNCE_MS = 1000;
 const MAX_CAPTURED_MEDIA_PER_TAB = 20;
 const MAX_PENDING_MEDIA_REQUESTS = 200;
 const CAPTURED_MEDIA_TTL_MS = 10 * 60 * 1000;
+const PASSIVE_METADATA_MAX_RUNTIME_MS = 30_000;
+const PASSIVE_METADATA_IDLE_TIMEOUT_MS = 10_000;
 
 interface MediaRequestDetails {
   id: number;
@@ -95,7 +97,7 @@ export class TabManager implements MediaFallbackProvider {
   private settingsManager?: SettingsManager;
   private mediaDetector?: MediaDetector;
   private ytdlp: YtDlpController;
-  private mediaDetectionAbort: Map<string, boolean> = new Map();
+  private mediaDetectionAbort: Map<string, AbortController> = new Map();
   private suspendTimer: ReturnType<typeof setInterval> | null = null;
   private sessionFilePath: string;
   private sessionSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -327,6 +329,7 @@ export class TabManager implements MediaFallbackProvider {
     const tab = this.tabs.get(tabId);
     if (!tab) return false;
 
+    this.cancelMediaProbe(tabId);
     this.window.contentView.removeChildView(tab.view);
     this.mediaDetector?.unregisterTabWebContents(tab.view.webContents.id);
     this.tabIdsByWebContentsId.delete(tab.view.webContents.id);
@@ -941,19 +944,17 @@ export class TabManager implements MediaFallbackProvider {
     managedTab.info.canGoBack = wc.navigationHistory.canGoBack();
     managedTab.info.canGoForward = wc.navigationHistory.canGoForward();
     managedTab.info.isSecure = url.startsWith('https://');
+    this.cancelMediaProbe(managedTab.id);
 
     // Tier 1: fast URL-pattern media detection
     if (this.isKnownVideoUrl(url)) {
       managedTab.info.mediaState = 'detecting';
       managedTab.info.mediaTitle = undefined;
-      // Abort any previous detection for this tab
-      this.mediaDetectionAbort.set(managedTab.id, true);
       // Start async tier 2 detection
       this.probeMediaAsync(managedTab);
     } else {
       managedTab.info.mediaState = 'none';
       managedTab.info.mediaTitle = undefined;
-      this.mediaDetectionAbort.set(managedTab.id, true);
     }
 
     this.notifyTabUpdate(managedTab.info);
@@ -966,15 +967,18 @@ export class TabManager implements MediaFallbackProvider {
   private async probeMediaAsync(managedTab: ManagedTab): Promise<void> {
     const tabId = managedTab.id;
     const url = managedTab.info.url;
-
-    // Set a unique detection ID so we can abort stale probes
-    this.mediaDetectionAbort.set(tabId, false);
+    const abortController = new AbortController();
+    this.mediaDetectionAbort.set(tabId, abortController);
 
     try {
-      const info = await this.ytdlp.getVideoInfo(url);
+      const info = await this.ytdlp.getVideoInfo(url, {
+        signal: abortController.signal,
+        maxRuntimeMs: PASSIVE_METADATA_MAX_RUNTIME_MS,
+        idleTimeoutMs: PASSIVE_METADATA_IDLE_TIMEOUT_MS,
+      });
 
       // Check if this detection was aborted (user navigated away)
-      if (this.mediaDetectionAbort.get(tabId)) return;
+      if (abortController.signal.aborted) return;
       // Check if tab still exists
       if (!this.tabs.has(tabId)) return;
       // Check URL hasn't changed
@@ -995,7 +999,7 @@ export class TabManager implements MediaFallbackProvider {
       log.info(`Media detected in tab ${tabId}: "${info.title}"`);
     } catch {
       // yt-dlp couldn't extract — not a supported media page
-      if (this.mediaDetectionAbort.get(tabId)) return;
+      if (abortController.signal.aborted) return;
       if (!this.tabs.has(tabId)) return;
       if (managedTab.info.url !== url) return;
 
@@ -1009,7 +1013,16 @@ export class TabManager implements MediaFallbackProvider {
 
       managedTab.info.mediaState = 'unsupported';
       this.notifyTabUpdate(managedTab.info);
+    } finally {
+      if (this.mediaDetectionAbort.get(tabId) === abortController) {
+        this.mediaDetectionAbort.delete(tabId);
+      }
     }
+  }
+
+  private cancelMediaProbe(tabId: string): void {
+    this.mediaDetectionAbort.get(tabId)?.abort();
+    this.mediaDetectionAbort.delete(tabId);
   }
 
   private captureMediaRequest(details: MediaRequestDetails): void {
@@ -1610,6 +1623,10 @@ export class TabManager implements MediaFallbackProvider {
 
     this.unsubscribeSettings?.();
     this.unsubscribeSettings = undefined;
+
+    for (const tabId of this.mediaDetectionAbort.keys()) {
+      this.cancelMediaProbe(tabId);
+    }
 
     session.defaultSession.webRequest.onBeforeSendHeaders(null);
     session.defaultSession.webRequest.onResponseStarted(null);
