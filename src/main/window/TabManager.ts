@@ -32,6 +32,7 @@ import {
 } from '../download/DownloadTargetResolver';
 import type { CapturedMediaFallback, MediaFallbackProvider } from '../download/MediaFallbackProvider';
 import type { MediaDetector } from '../media/MediaDetector';
+import { selectTabsToSuspend } from './TabSuspensionPolicy';
 import log from 'electron-log/main';
 
 interface ManagedTab {
@@ -44,7 +45,6 @@ interface ManagedTab {
   lastActiveAt: number;
 }
 
-const TAB_SUSPEND_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_TABS = 20;
 const SESSION_SAVE_DEBOUNCE_MS = 1000;
 const MAX_CAPTURED_MEDIA_PER_TAB = 20;
@@ -1632,17 +1632,21 @@ export class TabManager implements MediaFallbackProvider {
 
   private suspendInactiveTabs(): void {
     const now = Date.now();
-    for (const [tabId, tab] of this.tabs) {
-      // Don't suspend the active tab
-      if (tabId === this.activeTabId) continue;
-      // Don't suspend already-suspended tabs
-      if (tab.suspendedUrl) continue;
-      // Don't suspend tabs with active downloads (mediaState detected)
-      if (tab.info.mediaState === 'detecting') continue;
-
-      if (now - tab.lastActiveAt > TAB_SUSPEND_TIMEOUT_MS) {
-        this.suspendTab(tab);
-      }
+    const selected = selectTabsToSuspend(
+      Array.from(this.tabs.values()).map((tab) => ({
+        id: tab.id,
+        lastActiveAt: tab.lastActiveAt,
+        active: tab.id === this.activeTabId,
+        suspended: Boolean(tab.suspendedUrl),
+        audible: tab.view.webContents.isCurrentlyAudible(),
+        captured: tab.view.webContents.isBeingCaptured(),
+        detectingMedia: tab.info.mediaState === 'detecting',
+      })),
+      now,
+    );
+    for (const tabId of selected) {
+      const tab = this.tabs.get(tabId);
+      if (tab) this.suspendTab(tab);
     }
   }
 
