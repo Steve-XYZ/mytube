@@ -307,6 +307,7 @@ export function DownloadPanel({ visible, onClose }: DownloadPanelProps) {
 
         {visibleDownloads.map((item) => {
           const queuePosition = waitingPositions.get(item.id);
+          const boundedProgress = Math.max(0, Math.min(item.progress, 100));
           return (
             <article
               key={item.id}
@@ -319,9 +320,7 @@ export function DownloadPanel({ visible, onClose }: DownloadPanelProps) {
                   <p id={`download-${item.id}-title`} className="dp-item-title" title={item.title}>
                     {item.title}
                   </p>
-                  <p className="dp-item-status" aria-live="polite">
-                    {formatStatus(item, queuePosition)}
-                  </p>
+                  <p className="dp-item-status">{formatStatus(item, queuePosition)}</p>
                 </div>
               </div>
 
@@ -332,9 +331,9 @@ export function DownloadPanel({ visible, onClose }: DownloadPanelProps) {
                   aria-label={`Downloading ${item.title}`}
                   aria-valuemin={0}
                   aria-valuemax={100}
-                  aria-valuenow={Math.round(item.progress)}
+                  aria-valuenow={Math.round(boundedProgress)}
                 >
-                  <div className="dp-progress-fill" style={{ width: `${Math.min(item.progress, 100)}%` }} />
+                  <div className="dp-progress-fill" style={{ width: `${boundedProgress}%` }} />
                 </div>
               )}
 

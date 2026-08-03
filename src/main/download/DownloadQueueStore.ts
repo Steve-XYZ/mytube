@@ -160,25 +160,41 @@ export class SqliteDownloadStateStore implements DownloadStateStore {
       | undefined;
     if (imported) return;
 
+    const count = (this.db.prepare('SELECT COUNT(*) AS count FROM downloads').get() as { count: number }).count;
+    if (count > 0 || !fs.existsSync(this.legacyJsonPath)) {
+      this.markLegacyImported();
+      return;
+    }
+
+    let items: DownloadItem[];
     try {
-      const count = (this.db.prepare('SELECT COUNT(*) AS count FROM downloads').get() as { count: number }).count;
-      if (count === 0 && fs.existsSync(this.legacyJsonPath)) {
-        const parsed = JSON.parse(fs.readFileSync(this.legacyJsonPath, 'utf-8')) as unknown;
-        if (!Array.isArray(parsed)) throw new Error('Legacy download state must be an array');
-        const items = parsed.filter((item): item is DownloadItem =>
-          Boolean(item && typeof item === 'object' && 'id' in item && typeof item.id === 'string'),
-        );
-        this.save(items);
-        log.info(`Imported ${items.length} downloads from legacy JSON state`);
-      }
+      const parsed = JSON.parse(fs.readFileSync(this.legacyJsonPath, 'utf-8')) as unknown;
+      if (!Array.isArray(parsed)) throw new Error('Legacy download state must be an array');
+      items = parsed.filter((item): item is DownloadItem =>
+        Boolean(item && typeof item === 'object' && 'id' in item && typeof item.id === 'string'),
+      );
     } catch (error) {
       log.error('Failed to import legacy download state:', error);
       this.backupCorruptedLegacyState();
-    } finally {
-      this.db
-        .prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)')
-        .run('legacy_json_imported', String(Date.now()));
+      this.markLegacyImported();
+      return;
     }
+
+    try {
+      this.save(items);
+    } catch (error) {
+      log.error('Failed to persist imported legacy download state:', error);
+      return;
+    }
+
+    this.markLegacyImported();
+    log.info(`Imported ${items.length} downloads from legacy JSON state`);
+  }
+
+  private markLegacyImported(): void {
+    this.db
+      .prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)')
+      .run('legacy_json_imported', String(Date.now()));
   }
 
   private backupCorruptedLegacyState(): void {

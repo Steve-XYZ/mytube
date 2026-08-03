@@ -37,6 +37,7 @@ export class DownloadManager {
   private attemptTokens: Map<string, number> = new Map();
   private isDrainingQueue = false;
   private destroyed = false;
+  private unsubscribeSettings?: () => void;
   private nextQueueOrder = 1;
 
   constructor(
@@ -53,7 +54,7 @@ export class DownloadManager {
     this.defaultDownloadDir = settingsManager?.getDownloadDirectory() || path.join(app.getPath('downloads'), 'MyTube');
     if (settingsManager) {
       this.maxConcurrent = settingsManager.getMaxConcurrent();
-      settingsManager.onSettingChanged((key, value) => {
+      this.unsubscribeSettings = settingsManager.onSettingChanged((key, value) => {
         if (key === 'downloads.defaultDirectory') {
           this.defaultDownloadDir = value as string;
           if (!fs.existsSync(this.defaultDownloadDir)) {
@@ -225,7 +226,7 @@ export class DownloadManager {
   }
 
   private processQueue(): void {
-    if (this.isDrainingQueue) return;
+    if (this.destroyed || this.isDrainingQueue) return;
     this.isDrainingQueue = true;
 
     try {
@@ -533,7 +534,7 @@ export class DownloadManager {
   cancelPendingDownloads(): number {
     let cancelled = 0;
     for (const item of this.downloads.values()) {
-      if (!['resolving', 'retrying', 'queued', 'paused', 'needs-refresh'].includes(item.status)) continue;
+      if (!this.isPendingStatus(item.status)) continue;
       if (this.isActiveStatus(item.status)) {
         this.invalidateAttempt(item.id);
         this.ytdlp.cancel(item.id);
@@ -675,6 +676,10 @@ export class DownloadManager {
     return this.isActiveStatus(status) || status === 'queued' || status === 'paused' || status === 'needs-refresh';
   }
 
+  private isPendingStatus(status: DownloadItem['status']): boolean {
+    return status === 'resolving' || status === 'queued' || status === 'paused' || status === 'needs-refresh';
+  }
+
   private invalidateAttempt(id: string): void {
     this.attemptTokens.set(id, (this.attemptTokens.get(id) || 0) + 1);
     this.lastProgressUpdate.delete(id);
@@ -753,6 +758,8 @@ export class DownloadManager {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.unsubscribeSettings?.();
+    this.unsubscribeSettings = undefined;
     this.ytdlp.cancelAll();
     for (const id of this.downloads.keys()) {
       this.invalidateAttempt(id);

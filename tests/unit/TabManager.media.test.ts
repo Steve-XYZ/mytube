@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TabManager } from '../../src/main/window/TabManager';
+import { MEDIA_CAPTURE_TYPES, TabManager } from '../../src/main/window/TabManager';
 import type { CapturedMediaFallback } from '../../src/main/download/MediaFallbackProvider';
 
 interface RequestDetails {
@@ -47,12 +47,12 @@ function createProbe(): CaptureProbe {
   return probe;
 }
 
-function request(id: number, url: string): RequestDetails {
+function request(id: number, url: string, resourceType = 'media'): RequestDetails {
   return {
     id,
     webContentsId: 42,
     url,
-    resourceType: 'media',
+    resourceType,
     requestHeaders: {
       Referer: 'https://www.instagram.com/',
       Cookie: 'must-not-be-replayed',
@@ -109,6 +109,24 @@ describe('TabManager media request capture', () => {
     });
 
     expect(probe.getMediaFallbackForPage(PAGE_URL)).toBeNull();
+  });
+
+  it('keeps the capture filter aligned with supported media request types', () => {
+    expect(MEDIA_CAPTURE_TYPES).toEqual(['media', 'xhr']);
+    const probe = createProbe();
+    const details = request(4, 'https://cdn.example.com/reel.mp4', 'xhr');
+
+    probe.captureMediaRequest(details);
+    probe.captureMediaResponse({
+      ...details,
+      statusCode: 200,
+      responseHeaders: { 'Content-Type': ['video/mp4'] },
+    });
+
+    expect(probe.getMediaFallbackForPage(PAGE_URL)).toMatchObject({
+      url: details.url,
+      resourceType: 'xhr',
+    });
   });
 });
 

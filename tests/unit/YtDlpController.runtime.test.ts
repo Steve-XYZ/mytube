@@ -19,6 +19,11 @@ type PathProbe = {
   getPlatformDir: () => string;
 };
 
+type VersionCacheProbe = {
+  detectYtDlpVersion(binaryPath: string): Promise<string | null>;
+  getYtDlpEnvironment(): NodeJS.ProcessEnv;
+};
+
 const probe = () => Object.create(YtDlpController.prototype) as PathProbe;
 
 describe('YtDlpController version probing', () => {
@@ -32,6 +37,23 @@ describe('YtDlpController version probing', () => {
     expect(settled).toBe(false);
     await expect(versionPromise).resolves.toBe(process.version);
   });
+
+  it('reuses successful probes but retries a transient probe failure', async () => {
+    const controller = Object.create(YtDlpController.prototype) as VersionCacheProbe;
+    controller.getYtDlpEnvironment = () => process.env;
+
+    const successfulProbe = controller.detectYtDlpVersion(process.execPath);
+    expect(controller.detectYtDlpVersion(process.execPath)).toBe(successfulProbe);
+    await expect(successfulProbe).resolves.toBe(process.version);
+
+    const missingBinary = path.join(os.tmpdir(), `missing-ytdlp-${process.pid}-${Date.now()}`);
+    const failedProbe = controller.detectYtDlpVersion(missingBinary);
+    await expect(failedProbe).resolves.toBeNull();
+
+    const retryProbe = controller.detectYtDlpVersion(missingBinary);
+    expect(retryProbe).not.toBe(failedProbe);
+    await expect(retryProbe).resolves.toBeNull();
+  });
 });
 
 describe('YtDlpController metadata cancellation', () => {
@@ -39,7 +61,7 @@ describe('YtDlpController metadata cancellation', () => {
     expect(YtDlpController.prototype.getVideoInfo.length).toBe(2);
   });
 
-  it('terminates an in-flight metadata process when aborted', async () => {
+  it.skipIf(process.platform === 'win32')('terminates an in-flight metadata process when aborted', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytdlp-cancel-test-'));
     const binaryPath = path.join(tempDir, 'yt-dlp');
     fs.writeFileSync(binaryPath, "#!/bin/sh\ntrap 'exit 0' TERM\nwhile :; do sleep 1; done\n", { mode: 0o755 });

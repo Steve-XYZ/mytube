@@ -254,7 +254,12 @@ export class YtDlpController {
     const cached = YtDlpController.ytdlpVersionCache.get(binaryPath);
     if (cached) return cached;
 
-    const probe = probeYtDlpVersion(binaryPath, this.getYtDlpEnvironment());
+    const probe = probeYtDlpVersion(binaryPath, this.getYtDlpEnvironment()).then((version) => {
+      if (version === null && YtDlpController.ytdlpVersionCache.get(binaryPath) === probe) {
+        YtDlpController.ytdlpVersionCache.delete(binaryPath);
+      }
+      return version;
+    });
     YtDlpController.ytdlpVersionCache.set(binaryPath, probe);
     return probe;
   }

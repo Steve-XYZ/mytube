@@ -34,6 +34,7 @@ vi.mock('fs', async () => {
 import { DownloadManager } from '../../src/main/download/DownloadManager';
 import type { DownloadStateStore } from '../../src/main/download/DownloadQueueStore';
 import type { MediaFallbackProvider } from '../../src/main/download/MediaFallbackProvider';
+import type { SettingsManager } from '../../src/main/settings/SettingsManager';
 import type { DownloadItem } from '../../src/shared/types';
 
 class MemoryDownloadStateStore implements DownloadStateStore {
@@ -390,6 +391,23 @@ describe('DownloadManager', () => {
       expect(manager.getDownloadList().find((item) => item.id === waiting.id)?.status).toBe('cancelled');
     });
 
+    it('does not cancel an active retry transfer with pending downloads', async () => {
+      keepDownloadsPending();
+      manager.setMaxConcurrent(1);
+      const retrying = await manager.startDownload('https://example.com/1', { title: 'Retrying' });
+      const waiting = await manager.startDownload('https://example.com/2', { title: 'Waiting' });
+      await vi.waitFor(() =>
+        expect(manager.getDownloadList().find((item) => item.id === retrying.id)?.status).toBe('downloading'),
+      );
+      const downloads = (manager as unknown as { downloads: Map<string, DownloadItem> }).downloads;
+      downloads.get(retrying.id)!.status = 'retrying';
+
+      expect(manager.cancelPendingDownloads()).toBe(1);
+
+      expect(manager.getDownloadList().find((item) => item.id === retrying.id)?.status).toBe('retrying');
+      expect(manager.getDownloadList().find((item) => item.id === waiting.id)?.status).toBe('cancelled');
+    });
+
     it('reorders waiting items and updates their queue positions', async () => {
       keepDownloadsPending();
       manager.setMaxConcurrent(1);
@@ -516,6 +534,20 @@ describe('DownloadManager', () => {
       expect(ipcMain.removeHandler).toHaveBeenCalledWith('download:show-in-folder');
       expect(ipcMain.removeHandler).toHaveBeenCalledWith('download:remove');
       expect(ipcMain.removeHandler).toHaveBeenCalledWith('download:clear-completed');
+    });
+
+    it('unsubscribes from settings changes', () => {
+      const unsubscribe = vi.fn();
+      const settingsManager = {
+        getDownloadDirectory: () => '/tmp/mytube-downloads',
+        getMaxConcurrent: () => 3,
+        onSettingChanged: vi.fn(() => unsubscribe),
+      } as unknown as SettingsManager;
+      const mgr = new DownloadManager(mockSender, settingsManager, undefined, new MemoryDownloadStateStore());
+
+      mgr.destroy();
+
+      expect(unsubscribe).toHaveBeenCalledOnce();
     });
   });
 });

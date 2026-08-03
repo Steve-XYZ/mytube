@@ -47,9 +47,10 @@ const MAX_PENDING_MEDIA_REQUESTS = 200;
 const CAPTURED_MEDIA_TTL_MS = 10 * 60 * 1000;
 const PASSIVE_METADATA_MAX_RUNTIME_MS = 30_000;
 const PASSIVE_METADATA_IDLE_TIMEOUT_MS = 10_000;
+export const MEDIA_CAPTURE_TYPES: WebRequestFilter['types'] = ['media', 'xhr'];
 const MEDIA_CAPTURE_FILTER: WebRequestFilter = {
   urls: ['http://*/*', 'https://*/*'],
-  types: ['media', 'xhr'],
+  types: MEDIA_CAPTURE_TYPES,
 };
 
 interface MediaRequestDetails {
@@ -1127,7 +1128,7 @@ export class TabManager implements MediaFallbackProvider {
 
     if (isDirectMediaResourceUrl(details.url)) return true;
 
-    return details.resourceType === 'media' || details.resourceType === 'xhr' || details.resourceType === 'other';
+    return details.resourceType === 'media' || details.resourceType === 'xhr';
   }
 
   private isCapturableMediaResponse(details: MediaRequestDetails): boolean {

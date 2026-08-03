@@ -14,7 +14,7 @@ interface ToastContainerProps {
 
 export function ToastContainer({ messages, onDismiss }: ToastContainerProps) {
   return (
-    <div className="toast-container" aria-live="polite" aria-relevant="additions removals">
+    <div className="toast-container">
       {messages.map((msg) => (
         <ToastItem key={msg.id} message={msg} onDismiss={onDismiss} />
       ))}

@@ -31,7 +31,7 @@ describe('selectTabsToSuspend', () => {
 
   it('suspends least-recently-used tabs after a grace period when over budget', () => {
     const tabs = Array.from({ length: 10 }, (_, index) =>
-      tab(`tab-${index}`, { lastActiveAt: NOW - (index + 2) * 60_000 }),
+      tab(`tab-${index}`, { lastActiveAt: NOW - (2 + index * 0.5) * 60_000 }),
     );
 
     expect(selectTabsToSuspend(tabs, NOW)).toEqual(['tab-9', 'tab-8']);

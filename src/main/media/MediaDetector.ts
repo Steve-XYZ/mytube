@@ -110,6 +110,7 @@ export class MediaDetector {
           for (let start = 0; start < backgroundCandidates.length && images.length < MAX_IMAGES; start += BACKGROUND_BATCH_SIZE) {
             const batch = backgroundCandidates.slice(start, start + BACKGROUND_BATCH_SIZE);
             for (const el of batch) {
+              if (images.length >= MAX_IMAGES) break;
               if (el.offsetWidth === 0 || el.offsetHeight === 0) continue;
               const bg = getComputedStyle(el).backgroundImage;
               if (bg && bg !== 'none') {
