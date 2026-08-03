@@ -161,14 +161,26 @@ export class SqliteDownloadStateStore implements DownloadStateStore {
     if (imported) return;
 
     const count = (this.db.prepare('SELECT COUNT(*) AS count FROM downloads').get() as { count: number }).count;
-    if (count > 0 || !fs.existsSync(this.legacyJsonPath)) {
+    if (count > 0) {
       this.markLegacyImported();
+      return;
+    }
+
+    let raw: string;
+    try {
+      raw = fs.readFileSync(this.legacyJsonPath, 'utf-8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        this.markLegacyImported();
+      } else {
+        log.error('Failed to read legacy download state:', error);
+      }
       return;
     }
 
     let items: DownloadItem[];
     try {
-      const parsed = JSON.parse(fs.readFileSync(this.legacyJsonPath, 'utf-8')) as unknown;
+      const parsed = JSON.parse(raw) as unknown;
       if (!Array.isArray(parsed)) throw new Error('Legacy download state must be an array');
       items = parsed.filter((item): item is DownloadItem =>
         Boolean(item && typeof item === 'object' && 'id' in item && typeof item.id === 'string'),

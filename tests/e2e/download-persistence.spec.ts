@@ -44,6 +44,43 @@ test.describe('download queue persistence', () => {
     }
   });
 
+  test('retries the legacy import after a transient filesystem read failure', async () => {
+    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mytube-legacy-retry-'));
+    const legacyPath = path.join(userDataDir, 'downloads.json');
+    fs.mkdirSync(legacyPath);
+    let launched: LaunchedApp = await launchApp({ userDataDir });
+
+    try {
+      await launched.app.close();
+      fs.rmdirSync(legacyPath);
+      fs.writeFileSync(
+        legacyPath,
+        JSON.stringify([
+          {
+            id: 'legacy-retried-1',
+            url: 'https://example.com/retried',
+            title: 'Legacy import retried',
+            filename: 'retried.mp4',
+            savePath: path.join(userDataDir, 'retried.mp4'),
+            type: 'video',
+            status: 'completed',
+            progress: 100,
+            createdAt: Date.now() - 1_000,
+            completedAt: Date.now(),
+          },
+        ]),
+      );
+
+      launched = await launchApp({ userDataDir });
+      await launched.shell.getByTitle('Downloads (Cmd+J)').click();
+      await launched.shell.getByRole('tab', { name: 'Library' }).click();
+
+      await expect(launched.shell.getByText('Legacy import retried')).toBeVisible();
+    } finally {
+      await launched.close();
+    }
+  });
+
   test('restores queued work and pauses an interrupted active download', async () => {
     let launched: LaunchedApp = await launchApp();
 
