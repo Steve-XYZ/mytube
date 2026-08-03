@@ -467,7 +467,7 @@ export class YtDlpController {
       break;
     }
 
-    onError(lastError);
+    onError(this.getUserFacingExtractionError(new Error(lastError), url));
   }
 
   /** Build the format/output arguments shared by every download attempt. */
@@ -584,11 +584,10 @@ export class YtDlpController {
               resolve({ status: 'cancelled', filename: lastFilename, error: 'Download cancelled' });
             } else {
               log.error(`Download ${downloadId} [${profile.name}] failed with code ${code} after ${durationMs} ms`);
-              const detail = this.getUserFacingExtractionError(new Error(stderrTail.trim()), url);
               resolve({
                 status: 'error',
                 filename: lastFilename,
-                error: detail || `Download failed (exit code ${code})`,
+                error: stderrTail.trim() || `Download failed (exit code ${code})`,
               });
             }
           });
