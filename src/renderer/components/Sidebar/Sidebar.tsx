@@ -29,9 +29,7 @@ export function Sidebar({
 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_CACHE_KEY) === '1');
   const [themeSetting, setThemeSetting] = useState<unknown>(null);
-  const [osPrefersDark, setOsPrefersDark] = useState(
-    () => window.matchMedia('(prefers-color-scheme: dark)').matches,
-  );
+  const [osPrefersDark, setOsPrefersDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
 
   useEffect(() => {
     window.electronAPI.getSetting('browser.sidebarCollapsed').then((value: unknown) => {
