@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -279,6 +279,61 @@ describe('YtDlpController download profile selection', () => {
       }),
     ).toBe(false);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'falls back after a raw YouTube 403 instead of stopping at the UI error',
+    async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytdlp-profile-fallback-'));
+      const binaryPath = path.join(tempDir, 'yt-dlp');
+      fs.writeFileSync(
+        binaryPath,
+        [
+          '#!/bin/sh',
+          'if [ "$2" = "youtube-mweb-pot" ]; then',
+          "  echo 'ERROR: unable to download video data: HTTP Error 403: Forbidden' >&2",
+          '  exit 1',
+          'fi',
+          "echo '[download] /tmp/fallback.mp4 has already been downloaded'",
+        ].join('\n'),
+        { mode: 0o755 },
+      );
+      const controller = Object.create(YtDlpController.prototype) as {
+        binariesAvailable: boolean;
+        ytdlpPath: string;
+        ffmpegPath: string;
+        activeProcesses: Map<string, unknown>;
+        potProviderServerHome: string | null;
+        nodeRuntimePath: string | null;
+        withCommonArgs(
+          args: string[],
+          sourceUrl: string | undefined,
+          profile: DownloadProfile,
+        ): Promise<{ args: string[]; cleanup: () => void }>;
+        download: YtDlpController['download'];
+      };
+      controller.binariesAvailable = true;
+      controller.ytdlpPath = binaryPath;
+      controller.ffmpegPath = tempDir;
+      controller.activeProcesses = new Map();
+      controller.potProviderServerHome = '/pot';
+      controller.nodeRuntimePath = null;
+      controller.withCommonArgs = async (args, _sourceUrl, profile) => ({
+        args: ['--profile', profile.name, ...args],
+        cleanup: () => {},
+      });
+      const onComplete = vi.fn();
+      const onError = vi.fn();
+
+      try {
+        await controller.download('fallback-test', YT, { outputDir: tempDir }, vi.fn(), onComplete, onError);
+
+        expect(onComplete).toHaveBeenCalledWith('/tmp/fallback.mp4');
+        expect(onError).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe('YtDlpController download argument building', () => {
