@@ -8,6 +8,7 @@ type ShellWindow = {
   electronAPI: {
     startDownload(url: string, options?: { audioOnly?: boolean }): Promise<{ id: string }>;
     getMediaInfo(url: string): Promise<{ title: string; uploader: string; formats: Array<{ label: string }> } | null>;
+    setSetting(key: string, value: unknown): Promise<void>;
   };
 };
 
@@ -52,6 +53,30 @@ test.describe('download pipeline (mocked yt-dlp)', () => {
     }
   });
 
+  test('keeps semantically identified media pages instead of their temporary video source', async () => {
+    const server = await startTestServer();
+    try {
+      for (const [slug, videoSelector] of [
+        ['semantic-media-page', '#semantic-video'],
+        ['open-graph-media-page', '#open-graph-video'],
+      ]) {
+        const pageUrl = `${server.baseUrl}/${slug}`;
+        await launched.shell.locator('.url-input').fill(pageUrl);
+        await launched.shell.locator('.url-input').press('Enter');
+        const tabPage = await waitForPage(launched.app, (url) => url === pageUrl);
+        await expect(tabPage.locator(videoSelector)).toBeVisible();
+
+        const info = await launched.shell.evaluate((url) => {
+          return (window as unknown as ShellWindow).electronAPI.getMediaInfo(url);
+        }, pageUrl);
+
+        expect(info?.title).toBe(`Mock Video ${slug}`);
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
   test('downloads a video, shows it in the panel, and writes the file', async () => {
     const { shell, downloadDir } = launched;
 
@@ -64,12 +89,46 @@ test.describe('download pipeline (mocked yt-dlp)', () => {
 
     const item = shell.locator('.dp-item', { hasText: 'Mock Video e2emock1' });
     await expect(item).toBeVisible();
-    await expect(item.locator('.dp-status-completed')).toBeVisible({ timeout: 15_000 });
 
     const expectedFile = path.join(downloadDir, 'Mock Video e2emock1 [e2emock1].mp4');
     await expect.poll(() => fs.existsSync(expectedFile)).toBe(true);
+    await shell.getByRole('tab', { name: 'Library' }).click();
+    await expect(
+      shell.locator('.dp-item', { hasText: 'Mock Video e2emock1' }).locator('.dp-status-completed'),
+    ).toBeVisible();
 
     await expect(shell.locator('.toast-success', { hasText: 'Mock Video e2emock1' })).toBeVisible();
+  });
+
+  test('adds several links, exposes queue order, and supports pause/resume all', async () => {
+    const { shell } = launched;
+    await shell.evaluate(() => (window as unknown as ShellWindow).electronAPI.setSetting('downloads.maxConcurrent', 1));
+    await shell.getByTitle('Downloads (Cmd+J)').click();
+    await shell.getByRole('button', { name: 'Add links' }).click();
+    await shell
+      .getByLabel('Paste one link per line')
+      .fill(
+        [
+          'https://www.youtube.com/watch?v=queue1',
+          'https://www.youtube.com/watch?v=queue2',
+          'https://www.youtube.com/watch?v=queue3',
+        ].join('\n'),
+      );
+    await shell.getByRole('button', { name: 'Add to queue' }).click();
+
+    await expect(shell.locator('.dp-item')).toHaveCount(3);
+    await expect(shell.locator('.dp-summary')).toContainText('1 downloading');
+    await expect(shell.locator('.dp-summary')).toContainText('2 waiting');
+    await expect(shell.getByText('Waiting · Position 1')).toBeVisible();
+    await expect(shell.getByText('Waiting · Position 2')).toBeVisible();
+
+    await shell.getByRole('button', { name: 'Pause all' }).click();
+    await expect(shell.locator('.dp-item-paused')).toHaveCount(3);
+    await shell.getByRole('button', { name: 'Resume all' }).click();
+
+    await expect(shell.locator('.dp-item')).toHaveCount(0, { timeout: 15_000 });
+    await shell.getByRole('tab', { name: 'Library' }).click();
+    await expect(shell.locator('.dp-item-completed')).toHaveCount(3);
   });
 
   test('downloads audio-only through the -x path', async () => {
@@ -82,11 +141,14 @@ test.describe('download pipeline (mocked yt-dlp)', () => {
     );
 
     await shell.getByTitle('Downloads (Cmd+J)').click();
-    const item = shell.locator('.dp-item', { hasText: 'Mock Video e2eaudio1' });
-    await expect(item.locator('.dp-status-completed')).toBeVisible({ timeout: 15_000 });
+    await expect(shell.locator('.dp-item', { hasText: 'Mock Video e2eaudio1' })).toBeVisible();
 
     const expectedFile = path.join(downloadDir, 'Mock Video e2eaudio1 [e2eaudio1].mp3');
     await expect.poll(() => fs.existsSync(expectedFile)).toBe(true);
+    await shell.getByRole('tab', { name: 'Library' }).click();
+    await expect(
+      shell.locator('.dp-item', { hasText: 'Mock Video e2eaudio1' }).locator('.dp-status-completed'),
+    ).toBeVisible();
   });
 
   test('surfaces extraction failures in the panel and as a toast', async () => {

@@ -17,7 +17,16 @@ export interface TabInfo {
 }
 
 // ===== Download Types =====
-export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'completed' | 'failed';
+export type DownloadStatus =
+  | 'resolving'
+  | 'queued'
+  | 'downloading'
+  | 'retrying'
+  | 'paused'
+  | 'needs-refresh'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
 
 export interface DownloadItem {
   id: string;
@@ -37,7 +46,12 @@ export interface DownloadItem {
   thumbnail?: string;
   error?: string;
   createdAt: number;
+  queueOrder?: number;
+  queuePosition?: number;
+  attempt?: number;
+  targetResolvedAt?: number;
   completedAt?: number;
+  cancelledAt?: number;
 }
 
 export interface VideoFormat {
@@ -116,6 +130,10 @@ export const IPC_CHANNELS = {
   DOWNLOAD_RESUME: 'download:resume',
   DOWNLOAD_RETRY: 'download:retry',
   DOWNLOAD_CANCEL: 'download:cancel',
+  DOWNLOAD_PAUSE_ALL: 'download:pause-all',
+  DOWNLOAD_RESUME_ALL: 'download:resume-all',
+  DOWNLOAD_CANCEL_PENDING: 'download:cancel-pending',
+  DOWNLOAD_MOVE: 'download:move',
   DOWNLOAD_PROGRESS: 'download:progress',
   DOWNLOAD_COMPLETE: 'download:complete',
   DOWNLOAD_ERROR: 'download:error',

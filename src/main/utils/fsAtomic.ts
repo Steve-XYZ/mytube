@@ -17,3 +17,17 @@ export function writeFileAtomic(filePath: string, data: string | Buffer): void {
     throw err;
   }
 }
+
+/** Async counterpart for Main-process work that must not block the event loop. */
+export async function writeFileAtomicAsync(filePath: string, data: string | Buffer): Promise<void> {
+  const dir = path.dirname(filePath);
+  await fs.promises.mkdir(dir, { recursive: true });
+  const tmpPath = path.join(dir, `.${path.basename(filePath)}.${process.pid}.tmp`);
+  try {
+    await fs.promises.writeFile(tmpPath, data);
+    await fs.promises.rename(tmpPath, filePath);
+  } catch (err) {
+    await fs.promises.rm(tmpPath, { force: true });
+    throw err;
+  }
+}

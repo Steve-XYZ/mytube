@@ -2,6 +2,11 @@ import { app } from 'electron';
 import * as path from 'path';
 import { MainWindow } from './window/MainWindow';
 import log from 'electron-log/main';
+import {
+  formatProcessMetrics,
+  MainProcessPerformanceMonitor,
+  type ProcessPerformanceMetric,
+} from './performance/PerformanceMonitor';
 
 // Test support: isolate all persisted state (settings, downloads, session)
 // under a caller-provided directory. Must run before anything reads userData.
@@ -24,6 +29,30 @@ if (process.env.NODE_ENV === 'development' || process.env.VITE_DEV_SERVER_URL) {
 app.commandLine.appendSwitch('enable-features', 'WidevineCdm');
 
 let mainWindow: MainWindow | null = null;
+let performanceMonitor: MainProcessPerformanceMonitor | null = null;
+
+function getProcessPerformanceMetrics(): ProcessPerformanceMetric[] {
+  return app.getAppMetrics().map((metric) => ({
+    pid: metric.pid,
+    type: metric.type,
+    cpuPercent: metric.cpu.percentCPUUsage,
+    workingSetSizeKb: metric.memory.workingSetSize,
+  }));
+}
+
+function startPerformanceMonitor(): void {
+  if (performanceMonitor) return;
+  performanceMonitor = new MainProcessPerformanceMonitor({
+    getProcessMetrics: getProcessPerformanceMetrics,
+    onLag: (lagMs, metrics) => {
+      log.warn(`[performance] main_event_loop_lag_ms=${lagMs} processes="${formatProcessMetrics(metrics)}"`);
+    },
+    onMetrics: (metrics) => {
+      log.info(`[performance] process_metrics="${formatProcessMetrics(metrics)}"`);
+    },
+  });
+  performanceMonitor.start();
+}
 
 function createWindow(): void {
   mainWindow = new MainWindow();
@@ -97,6 +126,7 @@ app.on('web-contents-created', (_event, contents) => {
 
 app.whenReady().then(() => {
   createWindow();
+  startPerformanceMonitor();
 
   app.on('activate', () => {
     // macOS: re-create window when dock icon is clicked
@@ -114,6 +144,8 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  performanceMonitor?.stop();
+  performanceMonitor = null;
   if (mainWindow) {
     mainWindow.destroy();
   }

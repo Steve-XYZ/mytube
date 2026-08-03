@@ -39,14 +39,17 @@ function ToastItem({ message, onDismiss }: { message: ToastMessage; onDismiss: (
   }, [message.id, onDismiss]);
 
   return (
-    <div className={`toast toast-${message.type} ${exiting ? 'toast-exit' : ''}`}>
+    <div
+      className={`toast toast-${message.type} ${exiting ? 'toast-exit' : ''}`}
+      role={message.type === 'error' ? 'alert' : 'status'}
+    >
       <span className="toast-icon">
         {message.type === 'error' && '!'}
         {message.type === 'success' && '\u2713'}
         {message.type === 'info' && 'i'}
       </span>
       <span className="toast-text">{message.text}</span>
-      <button className="toast-close" onClick={handleDismiss}>
+      <button className="toast-close" onClick={handleDismiss} aria-label="Dismiss notification">
         &times;
       </button>
     </div>

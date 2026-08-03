@@ -172,6 +172,22 @@ describe('YtDlpUpdater', () => {
     expect(fs.existsSync(`${getManagedYtDlpPath(managedDir, 'linux')}.download`)).toBe(false);
   });
 
+  it('keeps the event loop responsive while probing the downloaded binary', async () => {
+    const slowBinary = `#!/bin/sh\nsleep 0.1\necho ${LATEST_VERSION}\n`;
+    routes[ASSET_URL] = () => stubResponse(slowBinary);
+    routes[CHECKSUM_URL] = () => stubResponse(checksumManifest(sha256(slowBinary)));
+    const updater = makeUpdater();
+    let timerFired = false;
+    setTimeout(() => {
+      timerFired = true;
+    }, 0);
+
+    const result = await updater.checkAndUpdate();
+
+    expect(result.status).toBe('updated');
+    expect(timerFired).toBe(true);
+  });
+
   it('fails cleanly when the release has no matching asset', async () => {
     routes[YTDLP_LATEST_RELEASE_URL] = () =>
       stubResponse(releaseJson({ assets: [{ name: 'SHA2-256SUMS', browser_download_url: CHECKSUM_URL }] }));

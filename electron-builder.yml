@@ -19,6 +19,8 @@ files:
 afterPack: ./scripts/verify-binaries.cjs
 
 asar: true
+asarUnpack:
+  - node_modules/better-sqlite3/**/*
 compression: maximum
 
 mac:

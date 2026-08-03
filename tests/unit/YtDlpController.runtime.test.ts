@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { app } from 'electron';
-import { YtDlpController } from '../../src/main/download/YtDlpController';
+import { probeYtDlpVersion, YtDlpController } from '../../src/main/download/YtDlpController';
 
 const originalIsPackaged = app.isPackaged;
 const originalResourcesPath = process.resourcesPath;
@@ -17,7 +19,85 @@ type PathProbe = {
   getPlatformDir: () => string;
 };
 
+type VersionCacheProbe = {
+  detectYtDlpVersion(binaryPath: string): Promise<string | null>;
+  getYtDlpEnvironment(): NodeJS.ProcessEnv;
+};
+
 const probe = () => Object.create(YtDlpController.prototype) as PathProbe;
+
+describe('YtDlpController version probing', () => {
+  it('probes a binary version asynchronously', async () => {
+    let settled = false;
+    const versionPromise = probeYtDlpVersion(process.execPath, process.env).then((version) => {
+      settled = true;
+      return version;
+    });
+
+    expect(settled).toBe(false);
+    await expect(versionPromise).resolves.toBe(process.version);
+  });
+
+  it('reuses successful probes but retries a transient probe failure', async () => {
+    const controller = Object.create(YtDlpController.prototype) as VersionCacheProbe;
+    controller.getYtDlpEnvironment = () => process.env;
+
+    const successfulProbe = controller.detectYtDlpVersion(process.execPath);
+    expect(controller.detectYtDlpVersion(process.execPath)).toBe(successfulProbe);
+    await expect(successfulProbe).resolves.toBe(process.version);
+
+    const missingBinary = path.join(os.tmpdir(), `missing-ytdlp-${process.pid}-${Date.now()}`);
+    const failedProbe = controller.detectYtDlpVersion(missingBinary);
+    await expect(failedProbe).resolves.toBeNull();
+
+    const retryProbe = controller.detectYtDlpVersion(missingBinary);
+    expect(retryProbe).not.toBe(failedProbe);
+    await expect(retryProbe).resolves.toBeNull();
+  });
+});
+
+describe('YtDlpController metadata cancellation', () => {
+  it('accepts per-request cancellation options', () => {
+    expect(YtDlpController.prototype.getVideoInfo.length).toBe(2);
+  });
+
+  it.skipIf(process.platform === 'win32')('terminates an in-flight metadata process when aborted', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytdlp-cancel-test-'));
+    const binaryPath = path.join(tempDir, 'yt-dlp');
+    fs.writeFileSync(binaryPath, "#!/bin/sh\ntrap 'exit 0' TERM\nwhile :; do sleep 1; done\n", { mode: 0o755 });
+    const controller = Object.create(YtDlpController.prototype) as {
+      ytdlpPath: string;
+      ffmpegPath: string;
+      execYtDlp(
+        args: string[],
+        sourceUrl: string | undefined,
+        profile: { name: string },
+        options: { signal: AbortSignal; maxRuntimeMs: number; idleTimeoutMs: number },
+      ): Promise<string>;
+    };
+    controller.ytdlpPath = binaryPath;
+    controller.ffmpegPath = tempDir;
+    const abortController = new AbortController();
+
+    try {
+      const request = controller.execYtDlp(
+        [],
+        undefined,
+        { name: 'test' },
+        {
+          signal: abortController.signal,
+          maxRuntimeMs: 5_000,
+          idleTimeoutMs: 5_000,
+        },
+      );
+      setTimeout(() => abortController.abort(), 20);
+
+      await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('YtDlpController packaged JavaScript runtime', () => {
   it('uses Electron as the bundled Node.js executable', () => {
@@ -100,6 +180,7 @@ type ProfileProbe = {
   isAllowedDownloadHeader: (headerName: string) => boolean;
   ytdlpVersion: string | null;
   shouldRetryDownloadWithNextProfile: (url: string, error: string, profile: DownloadProfile) => boolean;
+  shouldTryNextProfile: (url: string, error: unknown, profile: DownloadProfile) => boolean;
   withCommonArgs: (
     args: string[],
     sourceUrl: string | undefined,
@@ -189,6 +270,15 @@ describe('YtDlpController download profile selection', () => {
     ).toBe(true);
     expect(p.shouldRetryDownloadWithNextProfile('https://vimeo.com/1', 'Unsupported URL', browserProfile)).toBe(false);
   });
+
+  it('does not retry metadata profiles immediately when the site rate-limits requests', () => {
+    const p = profileProbe('/pot');
+    expect(
+      p.shouldTryNextProfile('https://vimeo.com/1', new Error('HTTP Error 429: Too Many Requests'), {
+        name: 'browser-context',
+      }),
+    ).toBe(false);
+  });
 });
 
 describe('YtDlpController download argument building', () => {
@@ -248,6 +338,37 @@ describe('YtDlpController user-facing extraction errors', () => {
 
     expect(message).toContain('blocked the downloader');
     expect(message).toContain('complete any challenge');
+  });
+
+  it('classifies DNS failures without exposing extractor internals', () => {
+    const message = profileProbe('/pot').getUserFacingExtractionError(
+      new Error('Unable to download webpage: [Errno -2] Name or service not known'),
+      'https://vimeo.com/123',
+    );
+
+    expect(message).toContain('could not resolve the site address');
+    expect(message).toContain('DNS');
+    expect(message).not.toContain('Errno');
+  });
+
+  it('distinguishes timeouts from unsupported media', () => {
+    const message = profileProbe('/pot').getUserFacingExtractionError(
+      new Error('yt-dlp metadata extraction timed out after 60000 ms'),
+      'https://vimeo.com/123',
+    );
+
+    expect(message).toContain('did not respond in time');
+    expect(message).toContain('retry');
+  });
+
+  it('asks the user to wait after a rate limit instead of retrying a browser fallback', () => {
+    const message = profileProbe('/pot').getUserFacingExtractionError(
+      new Error('HTTP Error 429: Too Many Requests'),
+      'https://vimeo.com/123',
+    );
+
+    expect(message).toContain('temporarily rate-limited');
+    expect(message).toContain('Wait a few minutes');
   });
 
   it('uses the site origin as referer for non-YouTube URLs', () => {

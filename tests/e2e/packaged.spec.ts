@@ -67,10 +67,13 @@ test.describe('packaged build', () => {
     );
 
     await shell.getByTitle('Downloads (Cmd+J)').click();
-    const item = shell.locator('.dp-item', { hasText: 'Mock Video packmock1' });
-    await expect(item.locator('.dp-status-completed')).toBeVisible({ timeout: 20_000 });
+    await expect(shell.locator('.dp-item', { hasText: 'Mock Video packmock1' })).toBeVisible();
 
     const expectedFile = path.join(downloadDir, 'Mock Video packmock1 [packmock1].mp4');
     await expect.poll(() => fs.existsSync(expectedFile)).toBe(true);
+    await shell.getByRole('tab', { name: 'Library' }).click();
+    await expect(
+      shell.locator('.dp-item', { hasText: 'Mock Video packmock1' }).locator('.dp-status-completed'),
+    ).toBeVisible();
   });
 });

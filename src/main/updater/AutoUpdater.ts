@@ -4,11 +4,17 @@ import log from 'electron-log/main';
 
 type WebContentsSender = { send: (channel: string, ...args: unknown[]) => void };
 
+export function isAppAutoUpdateEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.MYTUBE_AUTO_UPDATE_ENABLED === '1';
+}
+
 export class AutoUpdater {
   private appViewSender: WebContentsSender;
+  private enabled: boolean;
 
-  constructor(appViewSender: WebContentsSender) {
+  constructor(appViewSender: WebContentsSender, enabled = isAppAutoUpdateEnabled()) {
     this.appViewSender = appViewSender;
+    this.enabled = enabled;
 
     autoUpdater.logger = log;
     autoUpdater.autoDownload = false;
@@ -75,19 +81,30 @@ export class AutoUpdater {
   }
 
   checkForUpdates(): void {
+    if (!this.enabled) {
+      log.debug('App auto-update check skipped: no publish provider is configured');
+      this.appViewSender.send('updater:disabled');
+      return;
+    }
     autoUpdater.checkForUpdates().catch((err) => {
       log.error('Failed to check for updates:', err.message);
     });
   }
 
   downloadUpdate(): void {
+    if (!this.enabled) return;
     autoUpdater.downloadUpdate().catch((err) => {
       log.error('Failed to download update:', err.message);
     });
   }
 
   quitAndInstall(): void {
+    if (!this.enabled) return;
     autoUpdater.quitAndInstall();
+  }
+
+  isEnabled(): boolean {
+    return this.enabled;
   }
 
   destroy(): void {

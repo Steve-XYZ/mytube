@@ -3,7 +3,7 @@
   top: 88px;
   right: 0;
   bottom: 0;
-  width: 360px;
+  width: min(400px, 100vw);
   background: var(--bg-primary);
   border-left: 1px solid var(--border-color);
   display: flex;
@@ -102,6 +102,94 @@
 .dp-tab.active {
   background: var(--bg-secondary);
   color: var(--text-primary);
+}
+
+.dp-summary {
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.dp-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 12px 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.dp-toolbar-btn {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dp-toolbar-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.dp-toolbar-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.dp-toolbar-primary {
+  border-color: transparent;
+  background: var(--accent-gradient);
+  color: var(--accent-contrast);
+}
+
+.dp-toolbar-danger {
+  color: var(--danger-color);
+}
+
+.dp-batch-form {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.dp-batch-form label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dp-batch-form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 8px;
+}
+
+.dp-batch-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.dp-batch-error {
+  margin: 6px 0 0;
+  color: var(--danger-color);
+  font-size: 11px;
 }
 
 .dp-library-tools {
@@ -227,8 +315,9 @@
 }
 
 .dp-action-btn {
-  width: 26px;
-  height: 26px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 7px;
   border: none;
   background: transparent;
   cursor: pointer;
@@ -243,4 +332,16 @@
 
 .dp-action-btn:hover {
   background: var(--bg-hover);
+}
+
+.dp-tab:focus-visible,
+.dp-toolbar-btn:focus-visible,
+.dp-action-btn:focus-visible,
+.dp-clear-btn:focus-visible,
+.dp-close-btn:focus-visible,
+.dp-library-search:focus-visible,
+.dp-library-filter:focus-visible,
+.dp-batch-form textarea:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
 }

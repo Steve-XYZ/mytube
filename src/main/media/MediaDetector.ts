@@ -77,14 +77,17 @@ export class MediaDetector {
       const wc = webContents.fromId(webContentsId);
       if (!wc) return [];
 
-      // Inject script to find all images
+      // Scan in bounded batches so large pages never monopolize the renderer.
       const images: DetectedImage[] = await wc.executeJavaScript(`
-        (function() {
+        (async function() {
+          const MAX_IMAGES = 500;
+          const MAX_BACKGROUND_CANDIDATES = 1500;
+          const BACKGROUND_BATCH_SIZE = 100;
           const images = [];
           const seen = new Set();
 
           // Collect <img> elements
-          document.querySelectorAll('img').forEach(img => {
+          Array.from(document.images).slice(0, MAX_IMAGES).forEach(img => {
             const url = img.currentSrc || img.src;
             if (!url || url.startsWith('data:') || seen.has(url)) return;
             seen.add(url);
@@ -99,32 +102,42 @@ export class MediaDetector {
             });
           });
 
-          // Collect background images from CSS
-          document.querySelectorAll('*').forEach(el => {
-            const bg = getComputedStyle(el).backgroundImage;
-            if (bg && bg !== 'none') {
-              const match = bg.match(/url\\(["']?(https?:\\/\\/[^"')]+)["']?\\)/);
-              if (match && !seen.has(match[1])) {
-                seen.add(match[1]);
-                images.push({
-                  url: match[1],
-                  alt: '',
-                  width: el.offsetWidth || 0,
-                  height: el.offsetHeight || 0,
-                  naturalWidth: 0,
-                  naturalHeight: 0,
-                });
+          // Backgrounds are expensive because they require computed styles.
+          // Restrict the candidate set and yield between small batches.
+          const backgroundCandidates = Array.from(document.querySelectorAll(
+            'body, main, header, footer, section, article, aside, div, a, button, figure, [style*="background"]'
+          )).slice(0, MAX_BACKGROUND_CANDIDATES);
+          for (let start = 0; start < backgroundCandidates.length && images.length < MAX_IMAGES; start += BACKGROUND_BATCH_SIZE) {
+            const batch = backgroundCandidates.slice(start, start + BACKGROUND_BATCH_SIZE);
+            for (const el of batch) {
+              if (images.length >= MAX_IMAGES) break;
+              if (el.offsetWidth === 0 || el.offsetHeight === 0) continue;
+              const bg = getComputedStyle(el).backgroundImage;
+              if (bg && bg !== 'none') {
+                const match = bg.match(/url\\(["']?(https?:\\/\\/[^"')]+)["']?\\)/);
+                if (match && !seen.has(match[1])) {
+                  seen.add(match[1]);
+                  images.push({
+                    url: match[1],
+                    alt: '',
+                    width: el.offsetWidth || 0,
+                    height: el.offsetHeight || 0,
+                    naturalWidth: 0,
+                    naturalHeight: 0,
+                  });
+                }
               }
             }
-          });
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
 
           // Collect <picture> <source> elements
-          document.querySelectorAll('picture source').forEach(source => {
+          Array.from(document.querySelectorAll('picture source')).slice(0, MAX_IMAGES).forEach(source => {
             const srcset = source.srcset;
             if (srcset) {
               const urls = srcset.split(',').map(s => s.trim().split(' ')[0]);
               urls.forEach(url => {
-                if (url && !url.startsWith('data:') && !seen.has(url)) {
+                if (images.length < MAX_IMAGES && url && !url.startsWith('data:') && !seen.has(url)) {
                   seen.add(url);
                   images.push({
                     url: url,

@@ -9,16 +9,12 @@ import {
   clipboard,
   dialog,
   type BrowserWindow,
+  type WebRequestFilter,
 } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { TabInfo, IPC_CHANNELS, FindInPageResult } from '../../shared/types';
-import {
-  DEFAULT_URL,
-  HEADER_HEIGHT,
-  SIDEBAR_WIDTH_COLLAPSED,
-  SIDEBAR_WIDTH_EXPANDED,
-} from '../../shared/constants';
+import { DEFAULT_URL, HEADER_HEIGHT, SIDEBAR_WIDTH_COLLAPSED, SIDEBAR_WIDTH_EXPANDED } from '../../shared/constants';
 import type { SettingsManager } from '../settings/SettingsManager';
 import { writeFileAtomic } from '../utils/fsAtomic';
 import { YtDlpController } from '../download/YtDlpController';
@@ -31,6 +27,7 @@ import {
 } from '../download/DownloadTargetResolver';
 import type { CapturedMediaFallback, MediaFallbackProvider } from '../download/MediaFallbackProvider';
 import type { MediaDetector } from '../media/MediaDetector';
+import { selectTabsToSuspend } from './TabSuspensionPolicy';
 import log from 'electron-log/main';
 
 interface ManagedTab {
@@ -38,15 +35,23 @@ interface ManagedTab {
   view: WebContentsView;
   info: TabInfo;
   suspendedUrl?: string;
+  pendingMainFrameUrl?: string;
+  navigationStartedAt?: number;
   lastActiveAt: number;
 }
 
-const TAB_SUSPEND_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_TABS = 20;
 const SESSION_SAVE_DEBOUNCE_MS = 1000;
 const MAX_CAPTURED_MEDIA_PER_TAB = 20;
 const MAX_PENDING_MEDIA_REQUESTS = 200;
 const CAPTURED_MEDIA_TTL_MS = 10 * 60 * 1000;
+const PASSIVE_METADATA_MAX_RUNTIME_MS = 30_000;
+const PASSIVE_METADATA_IDLE_TIMEOUT_MS = 10_000;
+export const MEDIA_CAPTURE_TYPES: WebRequestFilter['types'] = ['media', 'xhr'];
+const MEDIA_CAPTURE_FILTER: WebRequestFilter = {
+  urls: ['http://*/*', 'https://*/*'],
+  types: MEDIA_CAPTURE_TYPES,
+};
 
 interface MediaRequestDetails {
   id: number;
@@ -94,13 +99,15 @@ export class TabManager implements MediaFallbackProvider {
   private settingsManager?: SettingsManager;
   private mediaDetector?: MediaDetector;
   private ytdlp: YtDlpController;
-  private mediaDetectionAbort: Map<string, boolean> = new Map();
+  private mediaDetectionAbort: Map<string, AbortController> = new Map();
   private suspendTimer: ReturnType<typeof setInterval> | null = null;
   private sessionFilePath: string;
   private sessionSaveTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
   private visitRecorder?: VisitRecorder;
   private unsubscribeSettings?: () => void;
+  private mediaCaptureEventCount = 0;
+  private mediaCaptureProcessingMs = 0;
 
   constructor(
     window: BaseWindow,
@@ -167,16 +174,31 @@ export class TabManager implements MediaFallbackProvider {
   }
 
   private setupMediaRequestCapture(): void {
-    session.defaultSession.webRequest.onBeforeSendHeaders((details: MediaRequestDetails, callback) => {
-      this.captureMediaRequest(details);
-      callback({ requestHeaders: details.requestHeaders || {} });
+    session.defaultSession.webRequest.onBeforeSendHeaders(
+      MEDIA_CAPTURE_FILTER,
+      (details: MediaRequestDetails, callback) => {
+        this.measureMediaCapture(() => this.captureMediaRequest(details));
+        callback({ requestHeaders: details.requestHeaders || {} });
+      },
+    );
+    session.defaultSession.webRequest.onResponseStarted(MEDIA_CAPTURE_FILTER, (details: MediaRequestDetails) => {
+      this.measureMediaCapture(() => this.captureMediaResponse(details));
     });
-    session.defaultSession.webRequest.onResponseStarted((details: MediaRequestDetails) => {
-      this.captureMediaResponse(details);
+    session.defaultSession.webRequest.onErrorOccurred(MEDIA_CAPTURE_FILTER, (details: MediaRequestDetails) => {
+      this.measureMediaCapture(() => this.pendingMediaRequests.delete(details.id));
     });
-    session.defaultSession.webRequest.onErrorOccurred((details: MediaRequestDetails) => {
-      this.pendingMediaRequests.delete(details.id);
-    });
+  }
+
+  private measureMediaCapture(operation: () => void): void {
+    const startedAt = performance.now();
+    operation();
+    this.mediaCaptureEventCount += 1;
+    this.mediaCaptureProcessingMs += performance.now() - startedAt;
+    if (this.mediaCaptureEventCount % 1_000 === 0) {
+      log.debug(
+        `[performance] media_capture events=${this.mediaCaptureEventCount} processing_ms=${this.mediaCaptureProcessingMs.toFixed(1)} pending=${this.pendingMediaRequests.size}`,
+      );
+    }
   }
 
   // ==================== Tab Lifecycle ====================
@@ -326,6 +348,7 @@ export class TabManager implements MediaFallbackProvider {
     const tab = this.tabs.get(tabId);
     if (!tab) return false;
 
+    this.cancelMediaProbe(tabId);
     this.window.contentView.removeChildView(tab.view);
     this.mediaDetector?.unregisterTabWebContents(tab.view.webContents.id);
     this.tabIdsByWebContentsId.delete(tab.view.webContents.id);
@@ -550,6 +573,19 @@ export class TabManager implements MediaFallbackProvider {
     const { view, info } = managedTab;
     const wc = view.webContents;
 
+    wc.on('did-start-navigation', (_event, url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace) {
+        managedTab.pendingMainFrameUrl = url;
+        managedTab.navigationStartedAt = /^https?:/i.test(url) ? Date.now() : undefined;
+      }
+    });
+
+    wc.on('will-redirect', (_event, url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace) {
+        managedTab.pendingMainFrameUrl = url;
+      }
+    });
+
     wc.on('did-start-loading', () => {
       info.isLoading = true;
       this.notifyTabUpdate(info);
@@ -558,17 +594,21 @@ export class TabManager implements MediaFallbackProvider {
     wc.on('did-stop-loading', () => {
       info.isLoading = false;
       this.notifyTabUpdate(info);
+      this.logNavigationTiming(managedTab, 'completed');
     });
 
-    // Log console errors from tab pages (helps debug video playback issues)
-    wc.on('console-message', (_event, level, message) => {
-      // level: 0=verbose, 1=info, 2=warning, 3=error
-      if (level >= 2) {
-        log.warn(`[Tab ${info.id}] console.${level >= 3 ? 'error' : 'warn'}: ${message.slice(0, 200)}`);
-      }
-    });
+    // Page consoles are extremely noisy on ad-heavy sites. Keep them opt-in
+    // outside development so production logs retain actionable app signals.
+    if (process.env.NODE_ENV === 'development' || process.env.MYTUBE_LOG_PAGE_CONSOLE === '1') {
+      wc.on('console-message', (_event, level, message) => {
+        if (level >= 2) {
+          log.warn(`[Tab ${info.id}] console.${level >= 3 ? 'error' : 'warn'}: ${message.slice(0, 200)}`);
+        }
+      });
+    }
 
     wc.on('did-navigate', (_event, navUrl) => {
+      managedTab.pendingMainFrameUrl = undefined;
       this.updateNavState(managedTab, this.getDisplayUrlForLoadedUrl(navUrl));
       // info.title still holds the previous page's title here; record with an
       // empty title (falls back to the URL) and let page-title-updated fill it.
@@ -657,8 +697,16 @@ export class TabManager implements MediaFallbackProvider {
     });
 
     // Handle did-fail-load — show error page
-    wc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
-      if (errorCode === -3) return; // ERR_ABORTED is normal (navigation cancelled)
+    wc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (errorCode === -3 || !isMainFrame) return; // ERR_ABORTED and subframe failures must not replace the tab
+
+      const expectedUrl = managedTab.pendingMainFrameUrl || managedTab.info.url;
+      if (expectedUrl && this.normalizeComparableUrl(expectedUrl) !== this.normalizeComparableUrl(validatedURL)) {
+        log.debug(`Ignored stale main-frame load failure for tab ${info.id}: ${this.redactUrlForLog(validatedURL)}`);
+        return;
+      }
+      this.logNavigationTiming(managedTab, 'failed');
+      managedTab.pendingMainFrameUrl = undefined;
       log.warn(`Tab ${info.id} failed to load: ${validatedURL} (${errorCode}: ${errorDescription})`);
 
       const errorPage = this.buildErrorPage(errorCode, errorDescription, validatedURL);
@@ -920,19 +968,17 @@ export class TabManager implements MediaFallbackProvider {
     managedTab.info.canGoBack = wc.navigationHistory.canGoBack();
     managedTab.info.canGoForward = wc.navigationHistory.canGoForward();
     managedTab.info.isSecure = url.startsWith('https://');
+    this.cancelMediaProbe(managedTab.id);
 
     // Tier 1: fast URL-pattern media detection
     if (this.isKnownVideoUrl(url)) {
       managedTab.info.mediaState = 'detecting';
       managedTab.info.mediaTitle = undefined;
-      // Abort any previous detection for this tab
-      this.mediaDetectionAbort.set(managedTab.id, true);
       // Start async tier 2 detection
       this.probeMediaAsync(managedTab);
     } else {
       managedTab.info.mediaState = 'none';
       managedTab.info.mediaTitle = undefined;
-      this.mediaDetectionAbort.set(managedTab.id, true);
     }
 
     this.notifyTabUpdate(managedTab.info);
@@ -945,15 +991,18 @@ export class TabManager implements MediaFallbackProvider {
   private async probeMediaAsync(managedTab: ManagedTab): Promise<void> {
     const tabId = managedTab.id;
     const url = managedTab.info.url;
-
-    // Set a unique detection ID so we can abort stale probes
-    this.mediaDetectionAbort.set(tabId, false);
+    const abortController = new AbortController();
+    this.mediaDetectionAbort.set(tabId, abortController);
 
     try {
-      const info = await this.ytdlp.getVideoInfo(url);
+      const info = await this.ytdlp.getVideoInfo(url, {
+        signal: abortController.signal,
+        maxRuntimeMs: PASSIVE_METADATA_MAX_RUNTIME_MS,
+        idleTimeoutMs: PASSIVE_METADATA_IDLE_TIMEOUT_MS,
+      });
 
       // Check if this detection was aborted (user navigated away)
-      if (this.mediaDetectionAbort.get(tabId)) return;
+      if (abortController.signal.aborted) return;
       // Check if tab still exists
       if (!this.tabs.has(tabId)) return;
       // Check URL hasn't changed
@@ -974,7 +1023,7 @@ export class TabManager implements MediaFallbackProvider {
       log.info(`Media detected in tab ${tabId}: "${info.title}"`);
     } catch {
       // yt-dlp couldn't extract — not a supported media page
-      if (this.mediaDetectionAbort.get(tabId)) return;
+      if (abortController.signal.aborted) return;
       if (!this.tabs.has(tabId)) return;
       if (managedTab.info.url !== url) return;
 
@@ -988,7 +1037,16 @@ export class TabManager implements MediaFallbackProvider {
 
       managedTab.info.mediaState = 'unsupported';
       this.notifyTabUpdate(managedTab.info);
+    } finally {
+      if (this.mediaDetectionAbort.get(tabId) === abortController) {
+        this.mediaDetectionAbort.delete(tabId);
+      }
     }
+  }
+
+  private cancelMediaProbe(tabId: string): void {
+    this.mediaDetectionAbort.get(tabId)?.abort();
+    this.mediaDetectionAbort.delete(tabId);
   }
 
   private captureMediaRequest(details: MediaRequestDetails): void {
@@ -1070,7 +1128,7 @@ export class TabManager implements MediaFallbackProvider {
 
     if (isDirectMediaResourceUrl(details.url)) return true;
 
-    return details.resourceType === 'media' || details.resourceType === 'xhr' || details.resourceType === 'other';
+    return details.resourceType === 'media' || details.resourceType === 'xhr';
   }
 
   private isCapturableMediaResponse(details: MediaRequestDetails): boolean {
@@ -1185,10 +1243,20 @@ export class TabManager implements MediaFallbackProvider {
 
       const canonical = document.querySelector('link[rel="canonical"]')?.getAttribute('href')
         || document.querySelector('meta[property="og:url"]')?.getAttribute('content');
+      const openGraphType = document.querySelector('meta[property="og:type"]')?.getAttribute('content')?.toLowerCase();
+      const hasOpenGraphMedia = openGraphType?.startsWith('video')
+        || openGraphType?.startsWith('audio')
+        || Boolean(document.querySelector('meta[property^="og:video"], meta[property^="og:audio"]'));
+      const hasPlayerCard = Boolean(document.querySelector(
+        'meta[name="twitter:player"], meta[name="twitter:card"][content="player"]',
+      ));
+      const hasStructuredMedia = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
+        .some((script) => /"@type"\\s*:\\s*(?:\\[\\s*)?"(?:VideoObject|AudioObject)"/i.test(script.textContent || ''));
       return {
         canonicalUrl: absoluteUrl(canonical),
         permalinkUrls,
         mediaUrl: absoluteUrl(active?.video.currentSrc || active?.video.src),
+        hasPageMediaMetadata: Boolean(hasOpenGraphMedia || hasPlayerCard || hasStructuredMedia),
         title: document.title || undefined,
       };
     })()`;
@@ -1202,6 +1270,27 @@ export class TabManager implements MediaFallbackProvider {
       return parsed.toString();
     } catch {
       return '[invalid-url]';
+    }
+  }
+
+  private logNavigationTiming(managedTab: ManagedTab, outcome: 'completed' | 'failed'): void {
+    if (managedTab.navigationStartedAt === undefined) return;
+    const durationMs = Date.now() - managedTab.navigationStartedAt;
+    managedTab.navigationStartedAt = undefined;
+    const origin = this.getOriginForLog(managedTab.pendingMainFrameUrl || managedTab.info.url);
+    const message = `[performance] navigation tab=${managedTab.id} outcome=${outcome} duration_ms=${durationMs} origin=${origin}`;
+    if (outcome === 'failed' || durationMs >= 3_000) {
+      log.warn(message);
+    } else {
+      log.debug(message);
+    }
+  }
+
+  private getOriginForLog(url: string): string {
+    try {
+      return new URL(url).origin;
+    } catch {
+      return '[invalid-origin]';
     }
   }
 
@@ -1549,17 +1638,21 @@ export class TabManager implements MediaFallbackProvider {
 
   private suspendInactiveTabs(): void {
     const now = Date.now();
-    for (const [tabId, tab] of this.tabs) {
-      // Don't suspend the active tab
-      if (tabId === this.activeTabId) continue;
-      // Don't suspend already-suspended tabs
-      if (tab.suspendedUrl) continue;
-      // Don't suspend tabs with active downloads (mediaState detected)
-      if (tab.info.mediaState === 'detecting') continue;
-
-      if (now - tab.lastActiveAt > TAB_SUSPEND_TIMEOUT_MS) {
-        this.suspendTab(tab);
-      }
+    const selected = selectTabsToSuspend(
+      Array.from(this.tabs.values()).map((tab) => ({
+        id: tab.id,
+        lastActiveAt: tab.lastActiveAt,
+        active: tab.id === this.activeTabId,
+        suspended: Boolean(tab.suspendedUrl),
+        audible: tab.view.webContents.isCurrentlyAudible(),
+        captured: tab.view.webContents.isBeingCaptured(),
+        detectingMedia: tab.info.mediaState === 'detecting',
+      })),
+      now,
+    );
+    for (const tabId of selected) {
+      const tab = this.tabs.get(tabId);
+      if (tab) this.suspendTab(tab);
     }
   }
 
@@ -1589,6 +1682,10 @@ export class TabManager implements MediaFallbackProvider {
 
     this.unsubscribeSettings?.();
     this.unsubscribeSettings = undefined;
+
+    for (const tabId of this.mediaDetectionAbort.keys()) {
+      this.cancelMediaProbe(tabId);
+    }
 
     session.defaultSession.webRequest.onBeforeSendHeaders(null);
     session.defaultSession.webRequest.onResponseStarted(null);

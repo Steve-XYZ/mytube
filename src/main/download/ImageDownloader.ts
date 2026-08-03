@@ -122,8 +122,7 @@ export class ImageDownloader {
         headers['Referer'] = referer;
       }
 
-      const client = url.startsWith('https') ? https : http;
-      const request = client.get(url, { headers }, (response) => {
+      const handleResponse = (response: http.IncomingMessage) => {
         // Handle redirects (max 5)
         if (
           response.statusCode &&
@@ -186,7 +185,11 @@ export class ImageDownloader {
         file.on('error', (err) => {
           fail(err);
         });
-      });
+      };
+
+      const request = url.startsWith('https')
+        ? https.get(url, { headers }, handleResponse)
+        : http.get(url, { headers }, handleResponse);
 
       request.on('error', (err) => {
         reject(err);

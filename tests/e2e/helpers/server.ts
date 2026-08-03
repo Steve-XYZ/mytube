@@ -4,6 +4,8 @@ import type { AddressInfo } from 'net';
 
 export interface TestServer {
   baseUrl: string;
+  failureBaseUrl: string;
+  waitForFailureRequest(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -63,6 +65,30 @@ const PAGES: Record<string, string> = {
     </a>
   </body>
 </html>`,
+  '/semantic-media-page': `<!doctype html>
+<html>
+  <head>
+    <title>E2E Semantic Media Page</title>
+    <script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"VideoObject","name":"Semantic media"}
+    </script>
+  </head>
+  <body>
+    <h1 id="heading">Semantic Media Page</h1>
+    <video id="semantic-video" src="/media/feed.mp4" width="640" height="360" muted autoplay controls></video>
+  </body>
+</html>`,
+  '/open-graph-media-page': `<!doctype html>
+<html>
+  <head>
+    <title>E2E Open Graph Media Page</title>
+    <meta property="og:type" content="video.other">
+  </head>
+  <body>
+    <h1 id="heading">Open Graph Media Page</h1>
+    <video id="open-graph-video" src="/media/feed.mp4" width="640" height="360" muted autoplay controls></video>
+  </body>
+</html>`,
   '/oauth-opener': `<!doctype html>
 <html>
   <head><title>OAuth opener</title></head>
@@ -120,6 +146,19 @@ function getImages(): Record<string, Buffer> {
 
 /** Local static server so navigation/gallery tests never depend on the live network. */
 export async function startTestServer(): Promise<TestServer> {
+  let resolveFailureRequest: (() => void) | undefined;
+  const failureRequest = new Promise<void>((resolve) => {
+    resolveFailureRequest = resolve;
+  });
+  const failureServer = http.createServer((req) => {
+    resolveFailureRequest?.();
+    resolveFailureRequest = undefined;
+    req.socket.destroy();
+  });
+  await new Promise<void>((resolve) => failureServer.listen(0, '127.0.0.1', resolve));
+  const failurePort = (failureServer.address() as AddressInfo).port;
+  const failureBaseUrl = `http://127.0.0.1:${failurePort}`;
+
   const server = http.createServer((req, res) => {
     const url = new URL(req.url || '/', 'http://127.0.0.1');
 
@@ -137,7 +176,17 @@ export async function startTestServer(): Promise<TestServer> {
       return;
     }
 
-    const body = PAGES[url.pathname];
+    const body =
+      url.pathname === '/subframe-failure'
+        ? `<!doctype html>
+<html>
+  <head><title>E2E Healthy Main Frame</title></head>
+  <body>
+    <h1 id="heading">Healthy Main Frame</h1>
+    <iframe id="broken-frame" src="${failureBaseUrl}/broken-frame"></iframe>
+  </body>
+</html>`
+        : PAGES[url.pathname];
     if (!body) {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('not found');
@@ -152,7 +201,14 @@ export async function startTestServer(): Promise<TestServer> {
 
   return {
     baseUrl: `http://127.0.0.1:${port}`,
-    close: () => new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
+    failureBaseUrl,
+    waitForFailureRequest: () => failureRequest,
+    close: async () => {
+      await Promise.all([
+        new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
+        new Promise<void>((resolve, reject) => failureServer.close((err) => (err ? reject(err) : resolve()))),
+      ]);
+    },
   };
 }
 

@@ -164,6 +164,11 @@ describe('TabManager - isKnownVideoUrl', () => {
       expect(isLikelyMediaUrl('https://www.bilibili.com/video/BV123')).toBe(true);
     });
 
+    it('detects localized and non-localized TokyVideo pages', () => {
+      expect(isLikelyMediaUrl('https://www.tokyvideo.com/es/video/episode-26')).toBe(true);
+      expect(isLikelyMediaUrl('https://www.tokyvideo.com/video/episode-26')).toBe(true);
+    });
+
     it('detects direct media URLs', () => {
       expect(isLikelyMediaUrl('https://cdn.example.com/video.mp4?token=abc')).toBe(true);
       expect(isLikelyMediaUrl('https://cdn.example.com/live/playlist.m3u8')).toBe(true);
@@ -188,6 +193,7 @@ describe('TabManager - isKnownVideoUrl', () => {
       expect(isLikelyMediaUrl('https://x.com/explore')).toBe(false);
       expect(isLikelyMediaUrl('https://www.facebook.com/some.profile')).toBe(false);
       expect(isLikelyMediaUrl('https://evilbandcamp.com/track/song')).toBe(false);
+      expect(isLikelyMediaUrl('https://www.tokyvideo.com/es/')).toBe(false);
     });
 
     it('rejects invalid URLs', () => {
